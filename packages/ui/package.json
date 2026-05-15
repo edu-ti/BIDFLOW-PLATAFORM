@@ -1,0 +1,31 @@
+{
+  "name": "@bidflow/ui",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./button": "./src/components/Button/index.tsx",
+    "./input": "./src/components/Input/index.tsx",
+    "./card": "./src/components/Card/index.tsx",
+    "./modal": "./src/components/Modal/index.tsx",
+    "./table": "./src/components/Table/index.tsx"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src --ext .ts,.tsx",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0"
+  }
+}

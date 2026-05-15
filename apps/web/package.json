@@ -1,0 +1,33 @@
+{
+  "name": "@bidflow/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "jest",
+    "clean": "rm -rf .next"
+  },
+  "dependencies": {
+    "@bidflow/ui": "*",
+    "@bidflow/types": "*",
+    "@bidflow/config": "*",
+    "next": "14.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "eslint": "^8.55.0",
+    "eslint-config-next": "14.0.4",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

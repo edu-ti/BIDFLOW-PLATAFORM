@@ -1,0 +1,978 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec-Driven Development YAML Template
+# =============================================================================
+# Use este template para especificar features completas no formato YAML.
+# Cada spec é um documento independente que descreve um módulo ou funcionalidade.
+# Localização: .specify/specs/<context>/<feature-name>.yml
+# Schema version: 1.0
+# =============================================================================
+
+spec:
+  # ── Metadados ────────────────────────────────────────────────────────────
+  id: "bidflow-XXX"                              # ID único do spec
+  title: "[Nome da Feature]"                     # Título descritivo
+  version: "1.0.0"                               # Versão do spec (semver)
+  status: draft                                   # draft | review | approved | deprecated
+  context: "[bounded-context]"                   # Nome do bounded context
+  author: "[Nome/Equipe]"
+  created: "[2026-05-15]"
+  updated: "[2026-05-15]"
+
+  tags:
+    - "[erp | crm | bidding | ai | saas | cross-cutting]"
+    - "[core-domain | supporting | generic]"
+
+  # ── Dependências ─────────────────────────────────────────────────────────
+  depends_on:
+    specs:                                        # IDs de specs que este depende
+      - "bidflow-XXX"
+      - "bidflow-YYY"
+    services:                                     # Serviços externos necessários
+      - "auth"
+      - "analytics"
+    apis:                                         # APIs externas
+      - name: "[External API]"
+        version: "v1"
+        contract: "[url ou path para contrato]"
+
+  # ── Visão Geral ──────────────────────────────────────────────────────────
+  overview: |
+    ## Descrição
+    [Descrição concisa da feature em 2-3 parágrafos.
+    Explique o problema de negócio, a solução proposta
+    e como ela se encaixa no ecossistema BidFlow.]
+
+    ## Objetivos de Negócio
+    1. [Objetivo mensurável 1]
+    2. [Objetivo mensurável 2]
+    3. [Objetivo mensurável 3]
+
+    ## Critérios de Sucesso
+    - [Métrica 1, ex: tempo de criação de RFP reduzido em 40%]
+    - [Métrica 2, ex: taxa de conversão de propostas > 60%]
+
+  # ── Módulos ──────────────────────────────────────────────────────────────
+  modules:
+
+    - id: "[module-id]"                          # Ex: "rfp-management"
+      name: "[Nome do Módulo]"                    # Ex: "Gestão de RFP"
+      description: "[Descrição do propósito]"
+
+      entities:
+        - id: "[EntityId]"                       # Ex: "Rfp"
+          name: "[Entidade]"                      # Ex: "RFP"
+          description: "[Descrição da entidade]"
+          aggregate_root: true                    # true | false
+          persistence:                             # Mapeamento Prisma/DB
+            table: "[snake_case_table_name]"       # Ex: "rfps"
+            indexes:
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+              description: "Identificador único"
+              example: "550e8400-e29b-41d4-a716-446655440000"
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              description: "Identificador do tenant (multi-tenant)"
+              example: "550e8400-e29b-41d4-a716-446655440000"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Título da RFP"
+              example: "Aquisição de Equipamentos Hospitalares"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "DRAFT"
+              values:
+                - "DRAFT"
+                - "PUBLISHED"
+                - "RECEIVING_PROPOSALS"
+                - "CLOSED"
+                - "AWARDED"
+                - "CANCELLED"
+              description: "Status do ciclo de vida"
+
+            - name: "modality"
+              type: "value_object"
+              ref: "Modality"
+              required: true
+              description: "Modalidade da licitação"
+
+            - name: "openingDate"
+              type: "datetime"
+              required: true
+              description: "Data de abertura das propostas"
+
+            - name: "closingDate"
+              type: "datetime"
+              required: true
+              description: "Data de fechamento"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:                              # Regras de consistência do aggregate
+            - "openingDate deve ser anterior a closingDate"
+            - "status só pode transitar para PUBLISHED se todos os lotes forem definidos"
+            - "só pode receber propostas se status == RECEIVING_PROPOSALS"
+
+          relationships:
+            - type: "has_many"                     # has_many | belongs_to | has_one
+              entity: "Lot"
+              via: "rfpId"
+              description: "Lotes que compõem a RFP"
+
+            - type: "has_many"
+              entity: "Proposal"
+              via: "rfpId"
+              description: "Propostas recebidas"
+
+            - type: "belongs_to"
+              entity: "Tenant"
+              via: "tenantId"
+              description: "Tenant proprietário"
+
+          value_objects:                            # Value Objects associados
+            - id: "Modality"
+              attributes:
+                - name: "type"
+                  type: "enum"
+                  values: ["OPEN_TENDER", "INVITED_TENDER", "COMPETITIVE_DIALOG"]
+                - name: "isElectronic"
+                  type: "boolean"
+                  default: true
+
+        - id: "Lot"
+          name: "Lote"
+          description: "Subdivisão de itens dentro de uma RFP"
+          aggregate_root: false
+          persistence:
+            table: "lots"
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+            - name: "number"
+              type: "integer"
+              required: true
+            - name: "description"
+              type: "text"
+              required: true
+            - name: "estimatedValue"
+              type: "money"
+              required: true
+
+        - id: "Proposal"
+          name: "Proposta"
+          description: "Conjunto de lances de um fornecedor"
+          aggregate_root: true
+          persistence:
+            table: "proposals"
+          attributes:
+            - name: "id"
+              type: "uuid"
+            - name: "supplierId"
+              type: "uuid"
+            - name: "totalAmount"
+              type: "money"
+            - name: "status"
+              type: "enum"
+              values: ["DRAFT", "SUBMITTED", "WITHDRAWN", "DISQUALIFIED"]
+
+        - id: "Contract"
+          name: "Contrato"
+          description: "Acordo formal resultante da adjudicação"
+          aggregate_root: true
+          persistence:
+            table: "contracts"
+          attributes:
+            - name: "id"
+              type: "uuid"
+            - name: "number"
+              type: "string"
+            - name: "value"
+              type: "money"
+            - name: "status"
+              type: "enum"
+              values: ["ACTIVE", "SUSPENDED", "COMPLETED", "TERMINATED"]
+            - name: "startDate"
+              type: "date"
+            - name: "endDate"
+              type: "date"
+
+      value_objects:
+        - id: "Money"
+          attributes:
+            - name: "amount"
+              type: "decimal"
+              precision: 12
+              scale: 2
+            - name: "currency"
+              type: "enum"
+              values: ["BRL", "USD", "EUR"]
+              default: "BRL"
+          invariants:
+            - "amount deve ser maior que zero"
+
+        - id: "Address"
+          attributes:
+            - name: "street"
+              type: "string"
+            - name: "city"
+              type: "string"
+            - name: "state"
+              type: "string"
+            - name: "zipCode"
+              type: "string"
+
+  # ── Regras de Negócio ─────────────────────────────────────────────────────
+  business_rules:
+
+    - id: "BR-001"
+      title: "Prazo mínimo de disputa"
+      description: "Uma disputa eletrônica deve ter duração mínima de 24 horas corridas"
+      scope: "Auction"
+      type: "hard"                                 # hard | soft | validation
+      error_code: "AUCTION_MIN_DURATION"
+      expression: "endDate - startDate >= 24 * 60 * 60 * 1000"
+
+    - id: "BR-002"
+      title: "Decremento mínimo entre lances"
+      description: "Cada lance deve reduzir o preço em no mínimo 0.5% do valor atual"
+      scope: "Bid"
+      type: "hard"
+      error_code: "BID_BELOW_MIN_DECREMENT"
+      expression: "currentPrice - bidAmount >= currentPrice * 0.005"
+
+    - id: "BR-003"
+      title: "Elegibilidade de fornecedor"
+      description: "Apenas fornecedores com status QUALIFIED podem submeter propostas"
+      scope: "Proposal"
+      type: "hard"
+      error_code: "SUPPLIER_NOT_QUALIFIED"
+
+    - id: "BR-004"
+      title: "Orçamento disponível"
+      description: "Valor total adjudicado não pode exceder o orçamento alocado"
+      scope: "Contract"
+      type: "hard"
+      error_code: "BUDGET_EXCEEDED"
+
+    - id: "BR-005"
+      title: "Prazo máximo para interpor recurso"
+      description: "Recurso contra resultado deve ser interposto em até 5 dias úteis"
+      scope: "Contract"
+      type: "hard"
+      error_code: "APPEAL_DEADLINE_EXCEEDED"
+
+    - id: "BR-006"
+      title: "Limite de licitações simultâneas por fornecedor"
+      description: "Fornecedor não pode participar de mais de N disputas simultâneas"
+      scope: "Supplier"
+      type: "soft"                                 # Regra soft: alerta, não bloqueia
+      error_code: "MAX_CONCURRENT_BIDS_WARNING"
+
+  # ── Workflows ─────────────────────────────────────────────────────────────
+  workflows:
+
+    - id: "wf-rfp-lifecycle"
+      name: "Ciclo de Vida da RFP"
+      description: "Workflow completo desde a criação até a adjudicação"
+      trigger: "RfpCreated"
+
+      states:
+        - id: "DRAFT"
+          label: "Rascunho"
+          initial: true
+          allowed_actions:
+            - "PUBLISH"
+            - "UPDATE"
+            - "DELETE"
+
+        - id: "PUBLISHED"
+          label: "Publicada"
+          allowed_actions:
+            - "START_RECEIVING"
+            - "CANCEL"
+
+        - id: "RECEIVING_PROPOSALS"
+          label: "Recebendo Propostas"
+          allowed_actions:
+            - "CLOSE"
+            - "EXTEND_DEADLINE"
+
+        - id: "CLOSED"
+          label: "Encerrada"
+          allowed_actions:
+            - "AWARD"
+            - "CANCEL"
+            - "REENABLE"
+
+        - id: "AWARDED"
+          label: "Adjudicada"
+          final: true
+
+        - id: "CANCELLED"
+          label: "Cancelada"
+          final: true
+
+      transitions:
+        - from: "DRAFT"
+          to: "PUBLISHED"
+          action: "PUBLISH"
+          conditions:
+            - "todos os lotes devem estar definidos"
+            - "pelo menos uma comissão deve ser atribuída"
+
+        - from: "PUBLISHED"
+          to: "RECEIVING_PROPOSALS"
+          action: "START_RECEIVING"
+          conditions:
+            - "data atual >= openingDate"
+
+        - from: "RECEIVING_PROPOSALS"
+          to: "CLOSED"
+          action: "CLOSE"
+          conditions:
+            - "data atual >= closingDate OU todas as propostas avaliadas"
+
+        - from: "CLOSED"
+          to: "AWARDED"
+          action: "AWARD"
+          conditions:
+            - "pelo menos uma proposta válida"
+            - "comissão aprovou resultado"
+
+        - from: "CLOSED"
+          to: "CANCELLED"
+          action: "CANCEL"
+          conditions: []
+
+      timeout:
+        - from: "PUBLISHED"
+          to: "CANCELLED"
+          after: "90 dias"
+          reason: "Nenhuma proposta recebida no período"
+
+    - id: "wf-bid-dispute"
+      name: "Disputa Eletrônica"
+      description: "Fluxo de lances em tempo real com prorrogação automática"
+      trigger: "AuctionStarted"
+
+      states:
+        - id: "PENDING"
+          initial: true
+        - id: "ACTIVE"
+        - id: "EXTENDED"
+        - id: "COMPLETED"
+        - id: "CANCELLED"
+
+      transitions:
+        - from: "PENDING"
+          to: "ACTIVE"
+          action: "START"
+          conditions:
+            - "startDate <= now()"
+
+        - from: "ACTIVE"
+          to: "EXTENDED"
+          action: "BID_PLACED"
+          conditions:
+            - "bid.timestamp >= endDate - extensionTime"
+
+        - from: ["ACTIVE", "EXTENDED"]
+          to: "COMPLETED"
+          action: "TIME_UP"
+          conditions:
+            - "endDate <= now()"
+            - "nenhum lance nos últimos extensionTime segundos"
+
+  # ── Eventos ───────────────────────────────────────────────────────────────
+  events:
+
+    - id: "evt-rfp-created"
+      name: "RfpCreated"
+      description: "Uma nova RFP foi criada"
+      domain: "[bounded-context]"
+      version: "v1"
+      type: "com.bidflow.[context].rfp.created.v1"
+      routing_key: "{tenantId}.rfp.created"
+
+      payload:
+        eventId:
+          type: "uuid"
+          required: true
+          description: "ID único do evento (idempotência)"
+        aggregateId:
+          type: "uuid"
+          required: true
+          description: "ID da RFP"
+        tenantId:
+          type: "uuid"
+          required: true
+          description: "ID do tenant"
+        timestamp:
+          type: "datetime"
+          required: true
+        data:
+          type: "object"
+          required: true
+          properties:
+            title:
+              type: "string"
+            modality:
+              type: "string"
+            openingDate:
+              type: "datetime"
+            closingDate:
+              type: "datetime"
+      metadata:
+        userId: "uuid"
+        correlationId: "uuid"
+        causationId: "uuid"
+
+      consumers:                                    # Quem consome este evento
+        - service: "analytics"
+          handler: "onRfpCreated"
+          async: true
+        - service: "crm"
+          handler: "notifySuppliers"
+          async: true
+
+    - id: "evt-bid-placed"
+      name: "BidPlaced"
+      description: "Um lance foi registrado em uma disputa"
+      version: "v1"
+      type: "com.bidflow.[context].bid.placed.v1"
+      routing_key: "{tenantId}.bid.placed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            auctionId: { type: "uuid" }
+            userId: { type: "uuid" }
+            amount: { type: "money" }
+            isAutomatic: { type: "boolean", default: false }
+
+      consumers:
+        - service: "analytics"
+          handler: "analyzeFraud"
+          async: true
+        - service: "web"
+          handler: "broadcastBid"
+          async: true
+
+    - id: "evt-contract-awarded"
+      name: "ContractAwarded"
+      description: "Um contrato foi adjudicado"
+      version: "v1"
+      type: "com.bidflow.[context].contract.awarded.v1"
+      routing_key: "{tenantId}.contract.awarded"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            contractId: { type: "uuid" }
+            supplierId: { type: "uuid" }
+            value: { type: "money" }
+            startDate: { type: "date" }
+            endDate: { type: "date" }
+
+      consumers:
+        - service: "erp"
+          handler: "commitBudget"
+          async: true
+        - service: "crm"
+          handler: "updateOpportunity"
+          async: true
+
+  # ── APIs ──────────────────────────────────────────────────────────────────
+  apis:
+
+    - controller: "[ModuleName]Controller"          # Ex: "RfpController"
+      prefix: "/api/v1/[module]"                    # Ex: "/api/v1/rfps"
+      auth: "required"                              # required | optional | none
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar [entidade]"
+          operation_id: "create[Entity]"
+          dto: "Create[Entity]Dto"
+          response: "[Entity]ResponseDto"
+          response_status: 201
+          permissions: ["[context].create"]          # Ex: "rfp.create"
+          idempotent: true
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar [entidades]"
+          operation_id: "list[Entity]"
+          dto: "Filter[Entity]Dto"
+          response: "PaginatedResponse<[Entity]ResponseDto>"
+          response_status: 200
+          permissions: ["[context].read"]
+          pagination: true
+          cache:
+            ttl: 60                                  # Segundos
+            key_pattern: "{tenantId}:[module]:list:{page}:{limit}"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter [entidade] por ID"
+          operation_id: "get[Entity]"
+          response: "[Entity]ResponseDto"
+          response_status: 200
+          permissions: ["[context].read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar [entidade]"
+          operation_id: "update[Entity]"
+          dto: "Update[Entity]Dto"
+          response: "[Entity]ResponseDto"
+          response_status: 200
+          permissions: ["[context].update"]
+          idempotent: true
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover [entidade]"
+          operation_id: "delete[Entity]"
+          response_status: 204
+          permissions: ["[context].delete"]
+
+        - method: "POST"
+          path: "/:id/publish"
+          summary: "Publicar [entidade]"
+          operation_id: "publish[Entity]"
+          response: "[Entity]ResponseDto"
+          response_status: 200
+          permissions: ["[context].publish"]
+
+        - method: "POST"
+          path: "/:id/cancel"
+          summary: "Cancelar [entidade]"
+          operation_id: "cancel[Entity]"
+          response: "[Entity]ResponseDto"
+          response_status: 200
+          permissions: ["[context].cancel"]
+
+      webhooks:
+        - name: "[entity].created"
+          url: "{tenant.webhookUrl}/[entity]/created"
+          events: ["[entity].created"]
+          secret: true
+
+    - controller: "[RelatedModule]Controller"
+      prefix: "/api/v1/[module]/:parentId/[submodule]"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Listar [subentidades] por [entidade pai]"
+          operation_id: "list[SubEntity]By[Entity]"
+          permissions: ["[context].read"]
+
+  # ── Permissões ───────────────────────────────────────────────────────────
+  permissions:
+
+    roles:
+      - id: "TENANT_ADMIN"
+        label: "Administrador do Tenant"
+        type: "admin"
+        policies:
+          - "[context].*"                           # Acesso total ao módulo
+
+      - id: "TENANT_MANAGER"
+        label: "Gerente"
+        type: "manager"
+        policies:
+          - "[context].create"
+          - "[context].read"
+          - "[context].update"
+          - "[context].publish"
+          - "[context].cancel"
+
+      - id: "TENANT_VIEWER"
+        label: "Consultor"
+        type: "viewer"
+        policies:
+          - "[context].read"
+
+      - id: "SUPPLIER"
+        label: "Fornecedor"
+        type: "external"
+        policies:
+          - "[context].proposal.submit"
+          - "[context].proposal.read"
+          - "[context].bid.place"
+          - "[context].bid.read"
+
+    resource_based:
+      - action: "[context].publish"
+        constraint: "user.role in ['TENANT_ADMIN', 'TENANT_MANAGER']"
+      - action: "[context].cancel"
+        constraint: "user.role in ['TENANT_ADMIN', 'TENANT_MANAGER']"
+      - action: "[context].award"
+        constraint: "user.role == 'TENANT_MANAGER' AND user is member of commission"
+
+  # ── Multi-tenant ─────────────────────────────────────────────────────────
+  multi_tenant:
+    isolation: "row-level"                         # row-level | schema-per-tenant | hybrid
+    tenant_column: "tenant_id"
+    filter_mode: "automatic"                       # automatic | manual
+
+    data_isolation:
+      - entity: "Rfp"
+        policy: "tenant_id = current_tenant_id"
+      - entity: "Proposal"
+        policy: "tenant_id = current_tenant_id"
+      - entity: "Contract"
+        policy: "tenant_id = current_tenant_id"
+
+    cache:
+      key_prefix: "{tenantId}:"
+      strategy: "per-tenant"                       # per-tenant | shared
+
+    queues:
+      routing_key_template: "{tenantId}.{eventType}"
+
+    features:
+      - name: "[feature-flag-name]"
+        description: "[Descrição da feature flag]"
+        default: false
+        scope: "tenant"                            # tenant | plan | user
+        plan_tiers:
+          - "STARTER": false
+          - "BUSINESS": true
+          - "ENTERPRISE": true
+
+  # ── Observabilidade ───────────────────────────────────────────────────────
+  observability:
+
+    logging:
+      level: "info"                                # debug | info | warn | error
+      format: "json"
+      include:
+        - "tenantId"
+        - "userId"
+        - "operationId"
+        - "entityId"
+        - "duration_ms"
+      sensitive_fields:                            # Campos que nunca devem ser logados
+        - "password"
+        - "token"
+        - "creditCard"
+        - "taxId"
+
+    metrics:
+      - name: "bidflow_[module]_created_total"
+        type: "counter"
+        description: "Total de [entidades] criadas"
+        labels:
+          - "tenant_id"
+          - "[attribute]"
+
+      - name: "bidflow_[module]_operation_duration_seconds"
+        type: "histogram"
+        description: "Duração das operações do módulo"
+        labels:
+          - "tenant_id"
+          - "operation"
+        buckets: [0.1, 0.3, 0.5, 1, 3, 5]
+
+      - name: "bidflow_[module]_error_total"
+        type: "counter"
+        description: "Total de erros no módulo"
+        labels:
+          - "tenant_id"
+          - "error_code"
+
+    tracing:
+      enabled: true
+      sampling_rate: 1.0                           # 0.0 a 1.0
+      attributes:
+        - "tenant.id"
+        - "user.id"
+        - "[entity].id"
+        - "command.type"
+
+    alerts:
+      - name: "[Module]HighErrorRate"
+        condition: "error_rate > 5%"
+        window: "5m"
+        severity: "warning"
+
+      - name: "[Module]HighLatency"
+        condition: "p95_latency > 3s"
+        window: "5m"
+        severity: "warning"
+
+  # ── Integrações ──────────────────────────────────────────────────────────
+  integrations:
+
+    internal:
+      - service: "analytics"
+        type: "event"                              # event | http | grpc | websocket
+        events_watched:
+          - "evt-[entity]-created"
+          - "evt-[entity]-updated"
+        events_published:
+          - "evt-fraud-alert-raised"
+        http_endpoints:
+          - path: "/api/v1/analytics/predict"
+            method: "POST"
+            timeout: "30s"
+            fallback: "return default prediction"
+
+      - service: "crm"
+        type: "event"
+        events_published:
+          - "evt-contract-awarded"
+        events_watched:
+          - "evt-supplier-qualified"
+          - "evt-lead-converted"
+
+      - service: "erp"
+        type: "event"
+        events_watched:
+          - "evt-contract-awarded"
+        events_published:
+          - "evt-budget-committed"
+          - "evt-invoice-approved"
+
+    external:
+      - name: "[External Integration Name]"
+        provider: "[provider]"                     # Ex: "gov-bidding-system"
+        type: "webhook"                            # webhook | api | file_import | sftp
+        protocol: "REST"
+        auth:
+          type: "oauth2"                           # apikey | oauth2 | mtls | basic
+          credentials: "[secret-reference]"
+        rate_limit:
+          max: 100
+          window: "1m"
+        retry:
+          max_attempts: 3
+          backoff: "exponential"
+        endpoints:
+          - path: "/api/external/publish"
+            method: "POST"
+            mapping: "Rfp → ExternalRfpSchema"
+
+  # ── AI Hooks ──────────────────────────────────────────────────────────────
+  ai_hooks:
+
+    inference_points:
+      - id: "ai-fraud-detection"
+        trigger: "BidPlaced"
+        description: "Analisa cada lance em tempo real para detectar fraude"
+        service: "analytics"
+        model: "fraud-detection-v2"
+        mode: "async"                                # sync | async
+        timeout: "5s"
+        fallback:
+          action: "allow"                            # allow | block | review
+          reason: "AI service unavailable"
+
+      - id: "ai-price-prediction"
+        trigger: "ProposalSubmitted"
+        description: "Valida se o preço proposto está dentro da faixa esperada"
+        service: "analytics"
+        model: "price-predictor-v1"
+        mode: "async"
+
+      - id: "ai-document-analysis"
+        trigger: "EditalUploaded"
+        description: "Extrai automaticamente dados de editais usando OCR + LLM"
+        service: "analytics"
+        model: "document-extractor-v2"
+        mode: "sync"
+        timeout: "30s"
+        fallback:
+          action: "manual_review"
+          reason: "Could not extract data automatically"
+
+      - id: "ai-supplier-recommendation"
+        trigger: "RfpPublished"
+        description: "Recomenda fornecedores qualificados para a licitação"
+        service: "analytics"
+        model: "recommender-v1"
+        mode: "async"
+
+    prompt_templates:
+      - id: "pt-document-summary"
+        version: "1.0"
+        description: "Sumariza editais longos em formato estruturado"
+        model: "gpt-4o"
+        template: |
+          Analise o seguinte edital de licitação e extraia:
+          - Modalidade
+          - Data de abertura e fechamento
+          - Valor estimado
+          - Critérios de avaliação
+          - Documentos exigidos
+
+          Edital:
+          {{document_text}}
+
+      - id: "pt-bid-analysis"
+        version: "1.0"
+        description: "Analisa padrões de lance para detecção de anomalias"
+        model: "gpt-4o-mini"
+        template: |
+          Analise o seguinte padrão de lances e identifique anomalias:
+          {{bid_data}}
+
+    feedback_loops:
+      - id: "fl-fraud-feedback"
+        source: "ai-fraud-detection"
+        type: "human_review"                         # human_review | implicit | explicit
+        storage: "prediction_feedback"
+        retrain_trigger: "1000_feedback_samples"
+
+      - id: "fl-prediction-feedback"
+        source: "ai-price-prediction"
+        type: "explicit"
+        storage: "prediction_feedback"
+        ui_component: "PredictionFeedbackWidget"
+
+  # ── Documentação ─────────────────────────────────────────────────────────
+  documentation:
+    user_guide: "[link para documentação do usuário]"
+    technical_docs: "[link para documentação técnica]"
+    openapi: ".specify/specs/[context]/[feature]-openapi.yml"
+    adr:
+      - ".specify/specs/[context]/[feature]-adr-001.md"
+      - ".specify/specs/[context]/[feature]-adr-002.md"
+
+  # ── Exemplos de Uso ──────────────────────────────────────────────────────
+  examples:
+
+    - id: "ex-create-rfp"
+      description: "Criar uma nova RFP"
+      request:
+        endpoint: "POST /api/v1/rfps"
+        body:
+          title: "Aquisição de Equipamentos de TI"
+          description: "Contratação de equipamentos para datacenter"
+          modality:
+            type: "OPEN_TENDER"
+            isElectronic: true
+          openingDate: "2026-06-01T09:00:00Z"
+          closingDate: "2026-06-30T18:00:00Z"
+          lots:
+            - number: 1
+              description: "Servidores"
+              estimatedValue: 500000.00
+            - number: 2
+              description: "Switches"
+              estimatedValue: 150000.00
+      response:
+        status: 201
+        body:
+          id: "550e8400-e29b-41d4-a716-446655440000"
+          status: "DRAFT"
+          title: "Aquisição de Equipamentos de TI"
+
+    - id: "ex-place-bid"
+      description: "Registrar lance em disputa eletrônica"
+      request:
+        endpoint: "POST /api/v1/bids"
+        body:
+          auctionId: "550e8400-e29b-41d4-a716-446655440000"
+          amount: 450000.00
+      response:
+        status: 201
+        body:
+          id: "660e8400-e29b-41d4-a716-446655440000"
+          amount: 450000.00
+          auctionId: "550e8400-e29b-41d4-a716-446655440000"
+
+  # ── Testes ────────────────────────────────────────────────────────────────
+  tests:
+    unit:
+      required: true
+      coverage_minimum: 80
+      files:
+        - "src/[context]/domain/**/*.spec.ts"
+        - "src/[context]/application/**/*.spec.ts"
+
+    integration:
+      required: true
+      files:
+        - "test/integration/[context]/*.e2e-spec.ts"
+
+    contract:
+      required: true
+      files:
+        - "test/contract/[context]-contract.test.ts"
+
+    e2e:
+      required: false
+      files:
+        - "test/e2e/[context]/[feature].e2e-spec.ts"
+
+  # ── Checklist de Implementação ────────────────────────────────────────────
+  checklist:
+    pre_implementation:
+      - "[ ] Spec revisado e aprovado pelo Architecture Review Board"
+      - "[ ] OpenAPI contract gerado e validado"
+      - "[ ] Eventos e payloads acordados com times downstream"
+      - "[ ] Testes escritos e falhando (TDD)"
+
+    implementation:
+      - "[ ] Value Objects implementados"
+      - "[ ] Entidade de domínio implementada"
+      - "[ ] Repository interface criada"
+      - "[ ] Repository implementation (Prisma) criada"
+      - "[ ] Migration Prisma gerada e revisada"
+      - "[ ] Command/Handler implementado"
+      - "[ ] Query/Handler implementado"
+      - "[ ] Controller + DTOs implementados"
+      - "[ ] Domain Events publicados"
+      - "[ ] Event Handlers implementados"
+      - "[ ] ACL implementada (se aplicável)"
+
+    post_implementation:
+      - "[ ] Testes unitários passando"
+      - "[ ] Testes de integração passando"
+      - "[ ] Cobertura >= 80%"
+      - "[ ] Lint e formatação ok"
+      - "[ ] Documentação atualizada"
+      - "[ ] Swagger/OpenAPI atualizado"
+      - "[ ] ADR documentado (se decisão arquitetural relevante)"

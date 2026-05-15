@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BidFlow Event Schema Registry",
+  "description": "Registro central de todos os schemas de eventos da plataforma",
+  "version": "1.0",
+  "events": {
+    "bidding": {
+      "RfpCreated": {
+        "v1": { "status": "active", "path": "bidding/rfp-created-v1.json", "since": "2026-05-15" }
+      },
+      "RfpPublished": {
+        "v1": { "status": "active", "path": "bidding/rfp-published-v1.json", "since": "2026-05-15" }
+      },
+      "ProposalSubmitted": {
+        "v1": { "status": "active", "path": "bidding/proposal-submitted-v1.json", "since": "2026-05-15" }
+      },
+      "ProposalDisqualified": {
+        "v1": { "status": "active", "path": "bidding/proposal-disqualified-v1.json", "since": "2026-05-15" }
+      },
+      "AuctionStarted": {
+        "v1": { "status": "active", "path": "bidding/auction-started-v1.json", "since": "2026-05-15" }
+      },
+      "BidPlaced": {
+        "v1": { "status": "active", "path": "bidding/bid-placed-v1.json", "since": "2026-05-15" }
+      },
+      "AuctionExtended": {
+        "v1": { "status": "active", "path": "bidding/auction-extended-v1.json", "since": "2026-05-15" }
+      },
+      "AuctionCompleted": {
+        "v1": { "status": "active", "path": "bidding/auction-completed-v1.json", "since": "2026-05-15" }
+      },
+      "ContractAwarded": {
+        "v1": { "status": "active", "path": "bidding/contract-awarded-v1.json", "since": "2026-05-15" }
+      },
+      "ContractSuspended": {
+        "v1": { "status": "active", "path": "bidding/contract-suspended-v1.json", "since": "2026-05-15" }
+      }
+    },
+    "erp": {
+      "SupplierQualified": {
+        "v1": { "status": "active", "path": "erp/supplier-qualified-v1.json", "since": "2026-05-15" }
+      },
+      "SupplierDisqualified": {
+        "v1": { "status": "active", "path": "erp/supplier-disqualified-v1.json", "since": "2026-05-15" }
+      },
+      "BudgetCommitted": {
+        "v1": { "status": "active", "path": "erp/budget-committed-v1.json", "since": "2026-05-15" }
+      },
+      "InvoiceApproved": {
+        "v1": { "status": "active", "path": "erp/invoice-approved-v1.json", "since": "2026-05-15" }
+      },
+      "PaymentProcessed": {
+        "v1": { "status": "active", "path": "erp/payment-processed-v1.json", "since": "2026-05-15" }
+      }
+    },
+    "crm": {
+      "LeadCaptured": {
+        "v1": { "status": "active", "path": "crm/lead-captured-v1.json", "since": "2026-05-15" }
+      },
+      "LeadQualified": {
+        "v1": { "status": "active", "path": "crm/lead-qualified-v1.json", "since": "2026-05-15" }
+      },
+      "LeadConverted": {
+        "v1": { "status": "active", "path": "crm/lead-converted-v1.json", "since": "2026-05-15" }
+      },
+      "OpportunityCreated": {
+        "v1": { "status": "active", "path": "crm/opportunity-created-v1.json", "since": "2026-05-15" }
+      },
+      "OpportunityWon": {
+        "v1": { "status": "active", "path": "crm/opportunity-won-v1.json", "since": "2026-05-15" }
+      },
+      "OpportunityLost": {
+        "v1": { "status": "active", "path": "crm/opportunity-lost-v1.json", "since": "2026-05-15" }
+      },
+      "CustomerTierChanged": {
+        "v1": { "status": "active", "path": "crm/customer-tier-changed-v1.json", "since": "2026-05-15" }
+      }
+    },
+    "ai": {
+      "PredictionCompleted": {
+        "v1": { "status": "active", "path": "ai/prediction-completed-v1.json", "since": "2026-05-15" }
+      },
+      "FraudAlertRaised": {
+        "v1": { "status": "active", "path": "ai/fraud-alert-raised-v1.json", "since": "2026-05-15" }
+      },
+      "ModelDeployed": {
+        "v1": { "status": "active", "path": "ai/model-deployed-v1.json", "since": "2026-05-15" }
+      },
+      "ModelTrainingCompleted": {
+        "v1": { "status": "active", "path": "ai/model-training-completed-v1.json", "since": "2026-05-15" }
+      },
+      "PromptTemplateUpdated": {
+        "v1": { "status": "active", "path": "ai/prompt-template-updated-v1.json", "since": "2026-05-15" }
+      }
+    },
+    "saas": {
+      "TenantRegistered": {
+        "v1": { "status": "active", "path": "saas/tenant-registered-v1.json", "since": "2026-05-15" }
+      },
+      "TenantActivated": {
+        "v1": { "status": "active", "path": "saas/tenant-activated-v1.json", "since": "2026-05-15" }
+      },
+      "TenantSuspended": {
+        "v1": { "status": "active", "path": "saas/tenant-suspended-v1.json", "since": "2026-05-15" }
+      },
+      "SubscriptionCreated": {
+        "v1": { "status": "active", "path": "saas/subscription-created-v1.json", "since": "2026-05-15" }
+      },
+      "SubscriptionChanged": {
+        "v1": { "status": "active", "path": "saas/subscription-changed-v1.json", "since": "2026-05-15" }
+      },
+      "SubscriptionCanceled": {
+        "v1": { "status": "active", "path": "saas/subscription-canceled-v1.json", "since": "2026-05-15" }
+      },
+      "QuotaExceeded": {
+        "v1": { "status": "active", "path": "saas/quota-exceeded-v1.json", "since": "2026-05-15" }
+      }
+    }
+  }
+}
