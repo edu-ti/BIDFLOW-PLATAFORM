@@ -1,0 +1,27 @@
+{
+  "name": "@bidflow/sdk",
+  "version": "1.0.0",
+  "description": "BidFlow Platform SDK — shared clients, contracts, auth, and utilities",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./clients": "./src/clients/index.ts",
+    "./contracts": "./src/contracts/index.ts",
+    "./auth": "./src/auth/index.ts",
+    "./tenant": "./src/tenant/index.ts",
+    "./tracing": "./src/tracing/index.ts",
+    "./retry": "./src/retry/index.ts",
+    "./observability": "./src/observability/index.ts",
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.10.0"
+  }
+}

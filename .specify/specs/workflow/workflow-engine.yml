@@ -1,0 +1,2150 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec: Workflow Engine
+# =============================================================================
+# Especificação do Workflow Engine — motor genérico de workflows configuráveis
+# que permite a definição de fluxos de estado, transições, aprovações,
+# atribuições e tarefas. Atua como generic subdomain cross-cutting,
+# consumido por todos os bounded contexts da plataforma.
+# Schema version: 1.0 | Spec-Driven Development
+# =============================================================================
+
+spec:
+  # ── Metadados ────────────────────────────────────────────────────────────
+  id: "bidflow-wf-001"
+  title: "Workflow Engine — Motor de Workflows Configuráveis"
+  version: "1.0.0"
+  status: draft
+  context: "workflow"
+  author: "Architecture Board"
+  created: "2026-05-15"
+  updated: "2026-05-15"
+
+  tags:
+    - "workflow"
+    - "generic-subdomain"
+    - "cross-cutting"
+    - "multi-tenant"
+    - "state-machine"
+
+  # ── Dependências ─────────────────────────────────────────────────────────
+  depends_on:
+    specs:
+      - "bidflow-auth-001"
+    services:
+      - "postgres"
+      - "redis"
+    apis: []
+
+  # ── Visão Geral ──────────────────────────────────────────────────────────
+  overview: |
+    ## Descrição
+    Workflow Engine é um motor genérico de workflows configuráveis que permite
+    que cada tenant defina fluxos de estado (workflows) customizados para qualquer
+    entidade da plataforma. Cada workflow é composto por estágios (stages) e
+    transições (transitions) que definem como uma entidade pode evoluir.
+
+    O motor suporta aprovações em múltiplos níveis, atribuição de responsáveis,
+    tarefas automáticas, deadlines por estágio, e timeline completa de cada
+    instância de workflow. É consumido pelos módulos de Licitações (fluxo de
+    aprovação de RFP), CRM (pipeline de vendas), ERP (fluxo de compras) e
+    quaisquer outros bounded contexts.
+
+    Diferente dos workflows hard-coded em cada domínio, o Workflow Engine
+    permite que administradores de tenant criem e modifiquem fluxos sem
+    necessidade de desenvolvimento — via API ou interface visual.
+
+    ## Objetivos de Negócio
+    1. Permitir que cada tenant defina workflows customizados sem código
+    2. Suportar aprovações em N níveis com regras de quem pode aprovar
+    3. Garantir rastreabilidade completa (quem fez o quê, quando, em qual estágio)
+    4. Integrar com qualquer entidade da plataforma via polimorfismo
+    5. Escalar para 10.000+ instâncias de workflow ativas por tenant
+
+    ## Critérios de Sucesso
+    - Criação de workflow definition < 1s
+    - Transição de estágio < 200ms (p95)
+    - Zero perda de histórico (timeline append-only)
+    - 100% de rastreabilidade em aprovações
+    - Suporte a workflows paralelos (fan-out) e sequenciais
+
+  # ── Módulos ──────────────────────────────────────────────────────────────
+
+  modules:
+
+    - id: "workflow-engine"
+      name: "Workflow Engine"
+      description: "Motor de workflows configuráveis com estágios, transições, aprovações e tarefas"
+
+      entities:
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: WorkflowDefinition
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "WorkflowDefinition"
+          name: "Definição de Workflow"
+          description: |
+            Template/configuração de um workflow. Define os estágios,
+            transições, regras de aprovação, deadlines e entidade alvo.
+            Ex: "Fluxo de Aprovação de RFP", "Pipeline de Vendas",
+            "Fluxo de Compras". Cada tenant pode ter N definições.
+          aggregate_root: true
+          persistence:
+            table: "workflow_definitions"
+            indexes:
+              - fields: ["tenant_id", "slug"]
+                unique: true
+              - fields: ["tenant_id", "entity_type"]
+              - fields: ["tenant_id", "is_active"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+              description: "Identificador único da definição"
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 150
+              description: "Nome do workflow"
+              example: "Fluxo de Aprovação de RFP"
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 80
+              description: "Identificador único do workflow (por tenant)"
+              example: "aprovacao-rfp"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 2000
+
+            - name: "entityType"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Tipo de entidade que este workflow gerencia"
+              example: "bidding.rfp | crm.opportunity | erp.purchase_order"
+              immutable: true
+
+            - name: "icon"
+              type: "string"
+              required: false
+              max_length: 50
+              description: "Ícone do workflow (para UI)"
+              example: "file-check"
+
+            - name: "color"
+              type: "string"
+              required: false
+              max_length: 7
+              description: "Cor primária (hex)"
+              example: "#1a73e8"
+
+            - name: "version"
+              type: "integer"
+              required: true
+              default: 1
+              description: "Versão da definição (incrementa em breaking changes)"
+
+            - name: "isActive"
+              type: "boolean"
+              required: true
+              default: true
+              description: "Se definição está ativa para novas instâncias"
+
+            - name: "isPublished"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Definição publicada (instâncias existentes não são afetadas)"
+
+            - name: "maxConcurrentInstances"
+              type: "integer"
+              required: false
+              description: "Limite de instâncias simultâneas (opcional)"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Metadados extensíveis"
+              example: '{"category": "approval", "department": "compras", "slaHours": 48}'
+
+            - name: "createdBy"
+              type: "uuid"
+              required: true
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "slug é único dentro do tenant"
+            - "entityType é imutável após criação"
+            - "definições com instâncias ativas não podem ser deletadas"
+            - "isPublished = true congela estágios e transições para novas instâncias"
+
+          relationships:
+            - type: "has_many"
+              entity: "Stage"
+              via: "workflowDefinitionId"
+              description: "Estágios do workflow"
+
+            - type: "has_many"
+              entity: "WorkflowInstance"
+              via: "workflowDefinitionId"
+              description: "Instâncias ativas deste workflow"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Stage
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Stage"
+          name: "Estágio"
+          description: |
+            Estágio dentro de um workflow definition. Cada estágio possui
+            ordem, nome, cor, configuração de aprovação (se aplicável),
+            deadline opcional e regras de atribuição. Estágios formam um
+            grafo direcionado acíclico (DAG) através das transições.
+          aggregate_root: false
+          persistence:
+            table: "workflow_stages"
+            indexes:
+              - fields: ["workflow_definition_id", "slug"]
+                unique: true
+              - fields: ["workflow_definition_id", "order"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "workflowDefinitionId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 80
+              description: "Identificador único do estágio (dentro do workflow)"
+              example: "rascunho | aguardando_aprovacao | aprovado | rejeitado"
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Nome exibível do estágio"
+              example: "Aguardando Aprovação"
+
+            - name: "description"
+              type: "string"
+              required: false
+              max_length: 500
+
+            - name: "order"
+              type: "integer"
+              required: true
+              minimum: 1
+              description: "Ordem sequencial do estágio"
+
+            - name: "color"
+              type: "string"
+              required: false
+              max_length: 7
+              description: "Cor do estágio (hex)"
+              example: "#ffa726"
+
+            - name: "type"
+              type: "enum"
+              required: true
+              default: "STANDARD"
+              values:
+                - "INITIAL"
+                - "STANDARD"
+                - "APPROVAL"
+                - "REVIEW"
+                - "FINISH"
+                - "CANCELLED"
+              description: "Tipo do estágio"
+
+            - name: "isInitial"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Estágio inicial do workflow (apenas 1 por definição)"
+
+            - name: "isFinal"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Estágio final (workflow concluído ao atingir)"
+
+            - name: "approvalConfig"
+              type: "json"
+              required: false
+              description: "Configuração de aprovação para estágios type = APPROVAL"
+              example: '{"mode": "ANY" | "ALL" | "SEQUENTIAL", "requiredApprovals": 1, "allowSelfApproval": false, "deadlineHours": 48}'
+
+            - name: "assignmentConfig"
+              type: "json"
+              required: false
+              description: "Regras de atribuição automática"
+              example: '{"mode": "ROLE" | "USER" | "MANAGER" | "QUEUE", "roleSlug": "approver", "userId": null}'
+
+            - name: "deadlineHours"
+              type: "integer"
+              required: false
+              description: "Prazo máximo neste estágio (horas)"
+
+            - name: "notifyOnEnter"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Notificar responsáveis ao entrar no estágio"
+
+            - name: "notifyOnExit"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Notificar ao sair do estágio"
+
+            - name: "allowRejection"
+              type: "boolean"
+              required: true
+              default: true
+              description: "Permite rejeitar/devolver para estágio anterior"
+
+            - name: "rejectionTargetStageId"
+              type: "uuid"
+              required: false
+              description: "Estágio de retorno em caso de rejeição (null = estágio anterior)"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "slug é único dentro do workflow definition"
+            - "apenas 1 estágio pode ser isInitial por workflow"
+            - "type INITIAL implica isInitial = true"
+            - "type FINISH implica isFinal = true"
+            - "approvalConfig só pode existir se type = APPROVAL"
+            - "deadlineHours deve ser >= 1"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "WorkflowDefinition"
+              via: "workflowDefinitionId"
+
+            - type: "has_many"
+              entity: "Transition"
+              via: "fromStageId"
+              description: "Transições de saída deste estágio"
+
+            - type: "has_many"
+              entity: "Transition"
+              via: "toStageId"
+              description: "Transições de entrada neste estágio"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: Transition
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Transition"
+          name: "Transição"
+          description: |
+            Define uma transição permitida entre dois estágios. Cada transição
+            possui um nome, ação que a dispara, condições opcionais e regras
+            de segurança (quem pode executar esta transição).
+          aggregate_root: false
+          persistence:
+            table: "workflow_transitions"
+            indexes:
+              - fields: ["workflow_definition_id", "slug"]
+                unique: true
+              - fields: ["workflow_definition_id", "from_stage_id"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "workflowDefinitionId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 80
+              description: "Identificador da transição"
+              example: "enviar_para_aprovacao | aprovar | rejeitar | cancelar"
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Nome da ação"
+              example: "Aprovar"
+
+            - name: "fromStageId"
+              type: "uuid"
+              required: true
+              description: "Estágio de origem"
+
+            - name: "toStageId"
+              type: "uuid"
+              required: true
+              description: "Estágio de destino"
+
+            - name: "conditions"
+              type: "json"
+              required: false
+              description: "Condições para executar a transição"
+              example: '{"requiredRole": "manager", "requiresComment": true, "requiresAttachment": false, "validateExpression": "entity.value > 50000"}'
+
+            - name: "permissions"
+              type: "json"
+              required: false
+              description: "Permissões necessárias para executar"
+              example: '{"roles": ["approver", "admin"], "selfService": false}'
+
+            - name: "isAutomatic"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Transição automática (executada por scheduler/evento)"
+
+            - name: "autoTriggerEvent"
+              type: "string"
+              required: false
+              description: "Evento que dispara esta transição automática"
+              example: "com.bidflow.bidding.proposal.submitted.v1"
+
+            - name: "order"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Ordem de exibição das transições disponíveis"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "fromStageId e toStageId devem pertencer ao mesmo workflow definition"
+            - "não pode haver transição de um estágio para ele mesmo"
+            - "transições não podem criar ciclos (DAG) — validado em publicação"
+            - "autoTriggerEvent obrigatório se isAutomatic = true"
+            - "slug é único dentro do workflow definition"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: WorkflowInstance
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "WorkflowInstance"
+          name: "Instância de Workflow"
+          description: |
+            Representa uma execução concreta de um workflow para uma entidade
+            específica. Mantém o estado atual (estágio), histórico de transições,
+            aprovações pendentes, assignments e tasks geradas. Cada instância
+            segue a definição do workflow, mas pode ter dados de execução próprios.
+          aggregate_root: true
+          persistence:
+            table: "workflow_instances"
+            indexes:
+              - fields: ["tenant_id", "workflow_definition_id"]
+              - fields: ["tenant_id", "entity_type", "entity_id"]
+                unique: true
+              - fields: ["tenant_id", "current_stage_id"]
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "assigned_to"]
+              - fields: ["tenant_id", "deadline_at"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "workflowDefinitionId"
+              type: "uuid"
+              required: true
+              immutable: true
+              description: "Definição de workflow que esta instância segue"
+
+            - name: "workflowVersion"
+              type: "integer"
+              required: true
+              description: "Versão da definição no momento da criação"
+
+            - name: "entityType"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Tipo de entidade associada"
+              example: "bidding.rfp"
+
+            - name: "entityId"
+              type: "uuid"
+              required: true
+              description: "ID da entidade associada"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 300
+              description: "Título descritivo da instância"
+              example: "Aprovação de RFP #001 - Aquisição de Equipamentos"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "ACTIVE"
+              values:
+                - "ACTIVE"
+                - "COMPLETED"
+                - "REJECTED"
+                - "CANCELLED"
+                - "ARCHIVED"
+              description: "Estado atual da instância"
+
+            - name: "currentStageId"
+              type: "uuid"
+              required: true
+              description: "Estágio atual da instância"
+
+            - name: "enteredStageAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "deadlineAt"
+              type: "datetime"
+              required: false
+              description: "Deadline calculado com base no estágio atual"
+
+            - name: "priority"
+              type: "enum"
+              required: true
+              default: "NORMAL"
+              values: ["LOW", "NORMAL", "HIGH", "URGENT"]
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+              description: "Responsável atual pela instância"
+
+            - name: "assignedRole"
+              type: "string"
+              required: false
+              max_length: 80
+              description: "Role do responsável atual"
+
+            - name: "data"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Dados de execução específicos da instância"
+              example: '{"justification": "Contrato urgente", "department": "TI", "totalValue": 150000}'
+
+            - name: "startedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "completedAt"
+              type: "datetime"
+              required: false
+
+            - name: "completedBy"
+              type: "uuid"
+              required: false
+
+            - name: "createdBy"
+              type: "uuid"
+              required: true
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "workflowDefinitionId + entityType + entityId deve ser único"
+            - "status ACTIVE exige currentStageId não-final"
+            - "status COMPLETED exige estágio final atingido"
+            - "deadlineAt calculado no enter do estágio (currentStage.deadlineHours)"
+            - "data não pode conter PII (campos sensíveis)"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "WorkflowDefinition"
+              via: "workflowDefinitionId"
+
+            - type: "belongs_to"
+              entity: "Stage"
+              via: "currentStageId"
+
+            - type: "has_many"
+              entity: "TransitionLog"
+              via: "workflowInstanceId"
+
+            - type: "has_many"
+              entity: "Approval"
+              via: "workflowInstanceId"
+
+            - type: "has_many"
+              entity: "WorkflowAssignment"
+              via: "workflowInstanceId"
+
+            - type: "has_many"
+              entity: "WorkflowTask"
+              via: "workflowInstanceId"
+
+            - type: "has_many"
+              entity: "WorkflowTimelineEntry"
+              via: "workflowInstanceId"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: TransitionLog
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "TransitionLog"
+          name: "Log de Transição"
+          description: |
+            Registro imutável de cada transição executada em uma instância.
+            Mantém histórico completo de todas as movimentações entre estágios.
+          aggregate_root: false
+          persistence:
+            table: "workflow_transition_logs"
+            indexes:
+              - fields: ["workflow_instance_id", "executed_at"]
+              - fields: ["tenant_id", "executed_at"]
+              - fields: ["workflow_instance_id", "from_stage_id"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: true
+
+            - name: "transitionSlug"
+              type: "string"
+              required: true
+              max_length: 80
+              description: "Slug da transição executada"
+
+            - name: "fromStageId"
+              type: "uuid"
+              required: true
+
+            - name: "fromStageName"
+              type: "string"
+              required: true
+              max_length: 100
+
+            - name: "toStageId"
+              type: "uuid"
+              required: true
+
+            - name: "toStageName"
+              type: "string"
+              required: true
+              max_length: 100
+
+            - name: "executedBy"
+              type: "uuid"
+              required: true
+              description: "Quem executou a transição"
+
+            - name: "executedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "comment"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Metadados da transição"
+              example: '{"ipAddress": "192.168.1.1", "origin": "api", "autoTriggered": false}'
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "TransitionLog é imutável (append-only)"
+            - "fromStageId e toStageId devem ser diferentes"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Approval
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Approval"
+          name: "Aprovação"
+          description: |
+            Representa uma aprovação ou rejeição em um estágio de aprovação.
+            Suporta modos ANY (qualquer aprovador), ALL (todos devem aprovar)
+            e SEQUENTIAL (ordem definida). Cada approval tem prazo e pode
+            ser delegada. Aprovações são imutáveis após registradas.
+          aggregate_root: true
+          persistence:
+            table: "workflow_approvals"
+            indexes:
+              - fields: ["workflow_instance_id", "stage_id"]
+              - fields: ["workflow_instance_id", "assigned_to", "status"]
+              - fields: ["tenant_id", "assigned_to", "status"]
+              - fields: ["tenant_id", "deadline_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: true
+
+            - name: "stageId"
+              type: "uuid"
+              required: true
+              description: "Estágio que requer esta aprovação"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "APPROVED"
+                - "REJECTED"
+                - "SKIPPED"
+                - "EXPIRED"
+
+            - name: "approvalMode"
+              type: "enum"
+              required: true
+              default: "ANY"
+              values:
+                - "ANY"
+                - "ALL"
+                - "SEQUENTIAL"
+              description: "Modo de aprovação deste estágio"
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: true
+              description: "Usuário designado para aprovar/rejeitar"
+
+            - name: "assignedRole"
+              type: "string"
+              required: false
+              max_length: 80
+
+            - name: "order"
+              type: "integer"
+              required: true
+              default: 1
+              description: "Ordem da aprovação (para SEQUENTIAL)"
+
+            - name: "decidedAt"
+              type: "datetime"
+              required: false
+              description: "Quando foi aprovado/rejeitado"
+
+            - name: "decision"
+              type: "enum"
+              required: false
+              values: ["APPROVED", "REJECTED"]
+
+            - name: "comment"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "delegatedFrom"
+              type: "uuid"
+              required: false
+              description: "Usuário que delegou (se aplicável)"
+
+            - name: "delegatedTo"
+              type: "uuid"
+              required: false
+              description: "Usuário que recebeu delegação"
+
+            - name: "deadlineAt"
+              type: "datetime"
+              required: false
+              description: "Prazo para aprovação"
+
+            - name: "remindedAt"
+              type: "datetime"
+              required: false
+              description: "Último lembrete enviado"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "status APPROVED exige decidedAt e comment preenchidos"
+            - "status REJECTED exige decidedAt e comment"
+            - "sequential approvals devem ser resolvidas em ordem"
+            - "ALL mode: todas as approvals do estágio devem ser APPROVED"
+            - "ANY mode: primeira APPROVED resolve o estágio"
+            - "approval não pode ser alterada após decidida"
+            - "delegatedTo não pode ser o mesmo que assignedTo"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "WorkflowInstance"
+              via: "workflowInstanceId"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: WorkflowAssignment
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "WorkflowAssignment"
+          name: "Atribuição de Workflow"
+          description: |
+            Atribuição de um usuário/responsável a uma instância de workflow.
+            Pode ser automática (baseada em regras) ou manual. Suporta
+            delegação e reatribuição.
+          aggregate_root: false
+          persistence:
+            table: "workflow_assignments"
+            indexes:
+              - fields: ["workflow_instance_id", "user_id"]
+              - fields: ["tenant_id", "user_id", "status"]
+              - fields: ["tenant_id", "role_slug"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: true
+
+            - name: "stageId"
+              type: "uuid"
+              required: true
+              description: "Estágio ao qual a atribuição se aplica"
+
+            - name: "userId"
+              type: "uuid"
+              required: true
+              description: "Usuário atribuído"
+
+            - name: "roleSlug"
+              type: "string"
+              required: false
+              max_length: 80
+              description: "Role pela qual foi atribuído"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "ACTIVE"
+              values:
+                - "ACTIVE"
+                - "DELEGATED"
+                - "COMPLETED"
+                - "REVOKED"
+
+            - name: "assignedBy"
+              type: "uuid"
+              required: true
+
+            - name: "assignedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "completedAt"
+              type: "datetime"
+              required: false
+
+            - name: "delegatedTo"
+              type: "uuid"
+              required: false
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "assignment ACTIVE só pode existir 1 por (instance, stage, user)"
+            - "status DELEGATED exige delegatedTo preenchido"
+            - "não pode delegar para o mesmo usuário"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: WorkflowTask
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "WorkflowTask"
+          name: "Tarefa de Workflow"
+          description: |
+            Tarefa gerada automaticamente ou manual dentro de uma instância
+            de workflow. Pode ser uma ação requerida (ex: "Anexar documentos",
+            "Preencher justificativa"). Tasks podem ter deadline e responsável.
+          aggregate_root: true
+          persistence:
+            table: "workflow_tasks"
+            indexes:
+              - fields: ["workflow_instance_id", "status"]
+              - fields: ["tenant_id", "assigned_to", "status"]
+              - fields: ["tenant_id", "stage_id"]
+              - fields: ["deadline_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: true
+
+            - name: "stageId"
+              type: "uuid"
+              required: true
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 300
+              example: "Anexar comprovante de proposta"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "type"
+              type: "enum"
+              required: true
+              default: "ACTION"
+              values:
+                - "ACTION"
+                - "UPLOAD"
+                - "FORM"
+                - "VALIDATION"
+                - "NOTIFICATION"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "IN_PROGRESS"
+                - "COMPLETED"
+                - "SKIPPED"
+                - "CANCELLED"
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+
+            - name: "assignedBy"
+              type: "uuid"
+              required: false
+
+            - name: "isMandatory"
+              type: "boolean"
+              required: true
+              default: true
+              description: "Se true, bloqueia transição até conclusão"
+
+            - name: "dueDate"
+              type: "datetime"
+              required: false
+
+            - name: "completedAt"
+              type: "datetime"
+              required: false
+
+            - name: "completedBy"
+              type: "uuid"
+              required: false
+
+            - name: "completedData"
+              type: "json"
+              required: false
+              description: "Dados coletados ao completar a task"
+              example: '{"fileName": "proposta.pdf", "fileSize": 2048576}'
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "isMandatory = true impede transição para próximo estágio"
+            - "status COMPLETED exige completedAt"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "WorkflowInstance"
+              via: "workflowInstanceId"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: WorkflowTimelineEntry
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "WorkflowTimelineEntry"
+          name: "Entrada de Timeline do Workflow"
+          description: |
+            Entrada imutável na timeline de uma instância de workflow.
+            Consolidada a partir de TransitionLogs, Approvals, Tasks e
+            eventos do sistema. Feed cronológico reverso.
+          aggregate_root: false
+          persistence:
+            table: "workflow_timeline_entries"
+            indexes:
+              - fields: ["workflow_instance_id", "occurred_at"]
+              - fields: ["tenant_id", "workflow_instance_id", "type"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: true
+
+            - name: "type"
+              type: "enum"
+              required: true
+              values:
+                - "INSTANCE_CREATED"
+                - "STAGE_ENTERED"
+                - "STAGE_EXITED"
+                - "TRANSITION_EXECUTED"
+                - "APPROVAL_REQUESTED"
+                - "APPROVED"
+                - "REJECTED"
+                - "TASK_CREATED"
+                - "TASK_COMPLETED"
+                - "ASSIGNED"
+                - "REASSIGNED"
+                - "DELEGATED"
+                - "COMMENT_ADDED"
+                - "DEADLINE_UPDATED"
+                - "PRIORITY_CHANGED"
+                - "AUTO_TRANSITIONED"
+                - "INSTANCE_COMPLETED"
+                - "INSTANCE_CANCELLED"
+                - "SYSTEM_EVENT"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 300
+              example: "Instância criada e atribuída a João Silva"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "transitionLogId"
+              type: "uuid"
+              required: false
+
+            - name: "approvalId"
+              type: "uuid"
+              required: false
+
+            - name: "taskId"
+              type: "uuid"
+              required: false
+
+            - name: "occurredAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "createdBy"
+              type: "uuid"
+              required: false
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              example: '{"fromStage": "rascunho", "toStage": "aguardando_aprovacao", "autoTriggered": false}'
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "WorkflowTimelineEntry é imutável (append-only)"
+            - "se type = APPROVED, approvalId é obrigatório"
+            - "se type = TRANSITION_EXECUTED, transitionLogId é obrigatório"
+
+      # ── Value Objects ──────────────────────────────────────────────────
+
+      value_objects:
+
+        - id: "ApprovalConfig"
+          description: "Configuração de aprovação de um estágio"
+          attributes:
+            - name: "mode"
+              type: "enum"
+              values: ["ANY", "ALL", "SEQUENTIAL"]
+            - name: "requiredApprovals"
+              type: "integer"
+              minimum: 1
+              default: 1
+            - name: "allowSelfApproval"
+              type: "boolean"
+              default: false
+            - name: "deadlineHours"
+              type: "integer"
+              minimum: 1
+              required: false
+            - name: "canDelegate"
+              type: "boolean"
+              default: true
+
+        - id: "AssignmentConfig"
+          description: "Regras de atribuição automática"
+          attributes:
+            - name: "mode"
+              type: "enum"
+              values: ["ROLE", "USER", "MANAGER", "QUEUE", "ROUND_ROBIN"]
+            - name: "roleSlug"
+              type: "string"
+              required: false
+            - name: "userId"
+              type: "uuid"
+              required: false
+
+        - id: "TransitionCondition"
+          description: "Condições para executar uma transição"
+          attributes:
+            - name: "requiredRole"
+              type: "string"
+              required: false
+            - name: "requiresComment"
+              type: "boolean"
+              default: false
+            - name: "requiresAttachment"
+              type: "boolean"
+              default: false
+            - name: "validateExpression"
+              type: "string"
+              required: false
+              description: "Expressão a ser validada antes da transição"
+
+        - id: "WorkflowStatus"
+          description: "Estado consolidado de uma instância"
+          attributes:
+            - name: "value"
+              type: "enum"
+              values: ["ACTIVE", "COMPLETED", "REJECTED", "CANCELLED", "ARCHIVED"]
+            - name: "isFinal"
+              type: "boolean"
+              computed: true
+
+  # ── Regras de Negócio ─────────────────────────────────────────────────────
+
+  business_rules:
+
+    - id: "WF-BR-001"
+      title: "DAG obrigatório"
+      description: "Workflow definitions devem formar um grafo direcionado acíclico (DAG) — ciclos são proibidos"
+      scope: "WorkflowDefinition"
+      type: "hard"
+      error_code: "WORKFLOW_CYCLE_DETECTED"
+      expression: "graph is acyclic (validated on publish)"
+
+    - id: "WF-BR-002"
+      title: "Único estágio inicial"
+      description: "Cada workflow definition deve ter exatamente 1 estágio com isInitial = true"
+      scope: "Stage"
+      type: "hard"
+      error_code: "INVALID_INITIAL_STAGE"
+      expression: "count(stages where isInitial) == 1"
+
+    - id: "WF-BR-003"
+      title: "Pelo menos um estágio final"
+      description: "Cada workflow definition deve ter pelo menos 1 estágio final"
+      scope: "Stage"
+      type: "hard"
+      error_code: "NO_FINAL_STAGE"
+      expression: "count(stages where isFinal) >= 1"
+
+    - id: "WF-BR-004"
+      title: "Ordem única"
+      description: "Ordem dos estágios deve ser sequencial (1, 2, 3...) sem gaps"
+      scope: "Stage"
+      type: "hard"
+      error_code: "STAGE_ORDER_INVALID"
+      expression: "stages.order forms a complete sequence from 1 to N"
+
+    - id: "WF-BR-005"
+      title: "Entidade única por workflow"
+      description: "Uma entidade só pode ter 1 instância ativa por workflow definition"
+      scope: "WorkflowInstance"
+      type: "hard"
+      error_code: "DUPLICATE_WORKFLOW_INSTANCE"
+      expression: "unique(workflowDefinitionId, entityType, entityId) para status ACTIVE"
+
+    - id: "WF-BR-006"
+      title: "Deadline tracking"
+      description: "Instância em estágio com deadlineHours deve ter deadlineAt calculado no enter"
+      scope: "WorkflowInstance"
+      type: "hard"
+      error_code: "DEADLINE_REQUIRED"
+      expression: "if currentStage.deadlineHours != null, deadlineAt = enteredStageAt + deadlineHours"
+
+    - id: "WF-BR-007"
+      title: "Transição válida"
+      description: "Transição deve ser entre estágios do mesmo workflow definition"
+      scope: "Transition"
+      type: "hard"
+      error_code: "TRANSITION_WF_MISMATCH"
+      expression: "fromStage.workflowDefinitionId == toStage.workflowDefinitionId"
+
+    - id: "WF-BR-008"
+      title: "Aprovação completa para avançar"
+      description: "Estágio type APPROVAL exige todas as approvals resolvidas antes de transicionar"
+      scope: "Approval"
+      type: "hard"
+      error_code: "APPROVALS_PENDING"
+      expression: "if currentStage.type == APPROVAL, all approvals resolved before transition"
+
+    - id: "WF-BR-009"
+      title: "Tasks mandatórias"
+      description: "Transição para próximo estágio bloqueada se há tasks mandatory pendentes"
+      scope: "WorkflowTask"
+      type: "hard"
+      error_code: "MANDATORY_TASKS_PENDING"
+      expression: "count(tasks where isMandatory and status != COMPLETED) == 0"
+
+    - id: "WF-BR-010"
+      title: "Definição publicada congela estrutura"
+      description: "Após publicação, estágios e transições não podem ser alterados (nova versão necessária)"
+      scope: "WorkflowDefinition"
+      type: "hard"
+      error_code: "PUBLISHED_WORKFLOW_IMMUTABLE"
+      expression: "if isPublished, stages and transitions are frozen"
+
+    - id: "WF-BR-011"
+      title: "Self-approval"
+      description: "Usuário não pode aprovar o próprio workflow se allowSelfApproval = false"
+      scope: "Approval"
+      type: "hard"
+      error_code: "SELF_APPROVAL_DENIED"
+      expression: "if !approvalConfig.allowSelfApproval, assignedTo != instance.createdBy"
+
+    - id: "WF-BR-012"
+      title: "Delegação única"
+      description: "Aprovação pode ser delegada apenas uma vez (sem redelegação)"
+      scope: "Approval"
+      type: "hard"
+      error_code: "MAX_DELEGATION_EXCEEDED"
+      expression: "delegatedFrom == null para delegatedTo poder delegar"
+
+  # ── Workflows ─────────────────────────────────────────────────────────────
+
+  workflows:
+
+    - id: "wf-instance-lifecycle"
+      name: "Ciclo de Vida da Instância de Workflow"
+      description: "Fluxo canônico de uma instância de workflow"
+      trigger: "POST /api/v1/workflow/instances"
+
+      stages:
+        - id: "CREATE"
+          label: "Criar instância"
+          description: "Instância criada no estágio inicial do workflow definition"
+          steps:
+            - "Validar workflow definition ativo"
+            - "Criar WorkflowInstance com estágio inicial"
+            - "Criar WorkflowAssignment automático (se configurado)"
+            - "Criar WorkflowTasks automáticas (se configuradas)"
+            - "Criar Approvals (se estágio inicial é APPROVAL)"
+            - "Criar WorkflowTimelineEntry (INSTANCE_CREATED)"
+
+        - id: "EXECUTE_TRANSITION"
+          label: "Executar transição"
+          description: "Usuário ou sistema executa uma transição disponível"
+          steps:
+            - "Validar que transição é permitida (regras, permissões, condições)"
+            - "Validar tasks mandatórias concluídas"
+            - "Validar approvals resolvidas (se estágio atual é APPROVAL)"
+            - "Criar TransitionLog"
+            - "Atualizar WorkflowInstance (currentStageId, enteredStageAt, deadlineAt)"
+            - "Se destino é FINAL: marcar status = COMPLETED"
+            - "Criar WorkflowTimelineEntry (TRANSITION_EXECUTED)"
+            - "Disparar notificações (se configuradas)"
+
+        - id: "APPROVE"
+          label: "Aprovar/rejeitar"
+          description: "Aprovador registra decisão sobre uma approval"
+          steps:
+            - "Validar que usuário é o assignedTo da approval"
+            - "Registrar Approval (APPROVED ou REJECTED)"
+            - "Se modo ALL e todas aprovaram → liberar transição"
+            - "Se modo ANY e um aprovou → liberar transição"
+            - "Se REJECTED → instância volta para rejectionTargetStage"
+            - "Criar WorkflowTimelineEntry (APPROVED/REJECTED)"
+
+        - id: "CANCEL"
+          label: "Cancelar instância"
+          description: "Instância cancelada por admin ou sistema"
+          steps:
+            - "Validar permissão de cancelamento"
+            - "Marcar WorkflowInstance.status = CANCELLED"
+            - "Resolver approvals pendentes como SKIPPED"
+            - "Notificar envolvidos"
+            - "Criar WorkflowTimelineEntry (INSTANCE_CANCELLED)"
+
+  # ── Eventos ───────────────────────────────────────────────────────────────
+
+  events:
+
+    - id: "evt-wf-instance-created"
+      name: "WorkflowInstanceCreated"
+      description: "Nova instância de workflow criada"
+      version: "v1"
+      type: "com.bidflow.workflow.instance.created.v1"
+      routing_key: "{tenantId}.workflow.instance.created"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "workflowInstanceId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            instanceId: { type: "uuid" }
+            workflowSlug: { type: "string" }
+            entityType: { type: "string" }
+            entityId: { type: "uuid" }
+            currentStage: { type: "string" }
+            assignedTo: { type: "uuid" }
+        consumers:
+          - service: "notifications"
+            handler: "notifyAssignedUser"
+            async: true
+
+    - id: "evt-wf-transition-executed"
+      name: "WorkflowTransitionExecuted"
+      description: "Transição executada em uma instância"
+      version: "v1"
+      type: "com.bidflow.workflow.transition.executed.v1"
+      routing_key: "{tenantId}.workflow.transition.executed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "workflowInstanceId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            instanceId: { type: "uuid" }
+            transitionSlug: { type: "string" }
+            fromStage: { type: "string" }
+            toStage: { type: "string" }
+            executedBy: { type: "uuid" }
+        consumers:
+          - service: "audit"
+            handler: "persistAuditLog"
+            async: true
+          - service: "analytics"
+            handler: "recordWorkflowMetric"
+            async: true
+
+    - id: "evt-wf-approval-completed"
+      name: "WorkflowApprovalCompleted"
+      description: "Aprovação foi concluída (approved ou rejected)"
+      version: "v1"
+      type: "com.bidflow.workflow.approval.completed.v1"
+      routing_key: "{tenantId}.workflow.approval.completed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "approvalId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            approvalId: { type: "uuid" }
+            instanceId: { type: "uuid" }
+            decision: { type: "enum", values: ["APPROVED", "REJECTED"] }
+            decidedBy: { type: "uuid" }
+            comment: { type: "string" }
+            stage: { type: "string" }
+
+    - id: "evt-wf-instance-completed"
+      name: "WorkflowInstanceCompleted"
+      description: "Instância de workflow concluída com sucesso"
+      version: "v1"
+      type: "com.bidflow.workflow.instance.completed.v1"
+      routing_key: "{tenantId}.workflow.instance.completed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "workflowInstanceId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            instanceId: { type: "uuid" }
+            workflowSlug: { type: "string" }
+            entityType: { type: "string" }
+            entityId: { type: "uuid" }
+            completedBy: { type: "uuid" }
+        consumers:
+          - service: "bidding"
+            handler: "onWorkflowCompleted"
+            async: true
+            description: "Notifica módulo de origem que workflow terminou"
+
+    - id: "evt-wf-instance-cancelled"
+      name: "WorkflowInstanceCancelled"
+      description: "Instância de workflow cancelada"
+      version: "v1"
+      type: "com.bidflow.workflow.instance.cancelled.v1"
+      routing_key: "{tenantId}.workflow.instance.cancelled"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "workflowInstanceId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            instanceId: { type: "uuid" }
+            reason: { type: "string" }
+            cancelledBy: { type: "uuid" }
+
+  # ── APIs ──────────────────────────────────────────────────────────────────
+
+  apis:
+
+    - controller: "WorkflowDefinitionsController"
+      prefix: "/api/v1/workflow/definitions"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar definição de workflow"
+          operation_id: "createWorkflowDefinition"
+          dto: "CreateWorkflowDefinitionDto"
+          response: "WorkflowDefinitionResponseDto"
+          response_status: 201
+          permissions: ["workflow.definition.create"]
+          audit: "WORKFLOW_DEFINITION_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar definições"
+          operation_id: "listWorkflowDefinitions"
+          dto: "WorkflowDefinitionFilterDto"
+          response: "WorkflowDefinitionResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.definition.read"]
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter definição com estágios e transições"
+          operation_id: "getWorkflowDefinition"
+          response: "WorkflowDefinitionDetailDto"
+          response_status: 200
+          permissions: ["workflow.definition.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar definição"
+          operation_id: "updateWorkflowDefinition"
+          dto: "UpdateWorkflowDefinitionDto"
+          response: "WorkflowDefinitionResponseDto"
+          response_status: 200
+          permissions: ["workflow.definition.update"]
+          audit: "WORKFLOW_DEFINITION_UPDATED"
+
+        - method: "POST"
+          path: "/:id/publish"
+          summary: "Publicar definição (congela estágios/transições)"
+          operation_id: "publishWorkflowDefinition"
+          response: "WorkflowDefinitionResponseDto"
+          response_status: 200
+          permissions: ["workflow.definition.publish"]
+          audit: "WORKFLOW_DEFINITION_PUBLISHED"
+
+        - method: "POST"
+          path: "/:id/version"
+          summary: "Criar nova versão da definição"
+          operation_id: "createWorkflowDefinitionVersion"
+          response: "WorkflowDefinitionResponseDto"
+          response_status: 201
+          permissions: ["workflow.definition.create"]
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover definição (apenas sem instâncias ativas)"
+          operation_id: "deleteWorkflowDefinition"
+          response_status: 204
+          permissions: ["workflow.definition.delete"]
+          audit: "WORKFLOW_DEFINITION_DELETED"
+
+    - controller: "StagesController"
+      prefix: "/api/v1/workflow/definitions/:definitionId/stages"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar estágio"
+          operation_id: "createStage"
+          dto: "CreateStageDto"
+          response: "StageResponseDto"
+          response_status: 201
+          permissions: ["workflow.definition.update"]
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar estágios"
+          operation_id: "listStages"
+          response: "StageResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.definition.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar estágio"
+          operation_id: "updateStage"
+          dto: "UpdateStageDto"
+          response: "StageResponseDto"
+          response_status: 200
+          permissions: ["workflow.definition.update"]
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover estágio"
+          operation_id: "deleteStage"
+          response_status: 204
+          permissions: ["workflow.definition.update"]
+          description: "Apenas se não houver instâncias ativas nele"
+
+    - controller: "TransitionsController"
+      prefix: "/api/v1/workflow/definitions/:definitionId/transitions"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar transição"
+          operation_id: "createTransition"
+          dto: "CreateTransitionDto"
+          response: "TransitionResponseDto"
+          response_status: 201
+          permissions: ["workflow.definition.update"]
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar transições"
+          operation_id: "listTransitions"
+          response: "TransitionResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.definition.read"]
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover transição"
+          operation_id: "deleteTransition"
+          response_status: 204
+          permissions: ["workflow.definition.update"]
+
+    - controller: "WorkflowInstancesController"
+      prefix: "/api/v1/workflow/instances"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar instância (iniciar workflow)"
+          operation_id: "createWorkflowInstance"
+          dto: "CreateWorkflowInstanceDto"
+          response: "WorkflowInstanceResponseDto"
+          response_status: 201
+          permissions: ["workflow.instance.create"]
+          audit: "WORKFLOW_INSTANCE_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar instâncias"
+          operation_id: "listWorkflowInstances"
+          dto: "WorkflowInstanceFilterDto"
+          response: "PaginatedResponse<WorkflowInstanceResponseDto>"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+            - param: "sort"
+              value: "createdAt_desc"
+          filters:
+            - "status"
+            - "workflowDefinitionId"
+            - "entityType"
+            - "entityId"
+            - "currentStageId"
+            - "assignedTo"
+            - "priority"
+            - "createdAt_from"
+            - "createdAt_to"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter instância com detalhes"
+          operation_id: "getWorkflowInstance"
+          response: "WorkflowInstanceDetailDto"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+
+        - method: "POST"
+          path: "/:id/transition"
+          summary: "Executar transição"
+          operation_id: "executeTransition"
+          dto: "ExecuteTransitionDto"
+          response: "WorkflowInstanceResponseDto"
+          response_status: 200
+          permissions: ["workflow.instance.transition"]
+          audit: "WORKFLOW_TRANSITION_EXECUTED"
+
+        - method: "POST"
+          path: "/:id/cancel"
+          summary: "Cancelar instância"
+          operation_id: "cancelWorkflowInstance"
+          dto: "CancelInstanceDto"
+          response_status: 204
+          permissions: ["workflow.instance.cancel"]
+          audit: "WORKFLOW_INSTANCE_CANCELLED"
+
+        - method: "POST"
+          path: "/:id/reassign"
+          summary: "Reatribuir responsável"
+          operation_id: "reassignWorkflowInstance"
+          dto: "ReassignDto"
+          response: "WorkflowInstanceResponseDto"
+          response_status: 200
+          permissions: ["workflow.instance.manage"]
+
+    - controller: "WorkflowApprovalsController"
+      prefix: "/api/v1/workflow/instances/:instanceId/approvals"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Listar aprovações da instância"
+          operation_id: "listApprovals"
+          response: "ApprovalResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+
+        - method: "POST"
+          path: "/:id/approve"
+          summary: "Aprovar"
+          operation_id: "approve"
+          dto: "ApprovalDecisionDto"
+          response: "ApprovalResponseDto"
+          response_status: 200
+          permissions: ["workflow.instance.approve"]
+          audit: "WORKFLOW_APPROVED"
+
+        - method: "POST"
+          path: "/:id/reject"
+          summary: "Rejeitar"
+          operation_id: "reject"
+          dto: "ApprovalDecisionDto"
+          response: "ApprovalResponseDto"
+          response_status: 200
+          permissions: ["workflow.instance.approve"]
+          audit: "WORKFLOW_REJECTED"
+
+        - method: "POST"
+          path: "/:id/delegate"
+          summary: "Delegar aprovação"
+          operation_id: "delegateApproval"
+          dto: "DelegateApprovalDto"
+          response: "ApprovalResponseDto"
+          response_status: 200
+          permissions: ["workflow.instance.approve"]
+
+    - controller: "WorkflowTasksController"
+      prefix: "/api/v1/workflow/instances/:instanceId/tasks"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Listar tarefas da instância"
+          operation_id: "listWorkflowTasks"
+          dto: "WorkflowTaskFilterDto"
+          response: "WorkflowTaskResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+
+        - method: "POST"
+          path: "/:id/complete"
+          summary: "Completar tarefa"
+          operation_id: "completeWorkflowTask"
+          dto: "CompleteWorkflowTaskDto"
+          response_status: 204
+          permissions: ["workflow.instance.task"]
+          audit: "WORKFLOW_TASK_COMPLETED"
+
+    - controller: "WorkflowTimelineController"
+      prefix: "/api/v1/workflow/instances/:instanceId/timeline"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Timeline da instância"
+          operation_id: "getWorkflowTimeline"
+          response: "WorkflowTimelineEntryDto[]"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+          defaults:
+            - param: "limit"
+              value: 100
+
+    - controller: "WorkflowDashboardController"
+      prefix: "/api/v1/workflow/dashboard"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/summary"
+          summary: "Resumo do workflow engine"
+          operation_id: "getWorkflowSummary"
+          response: "WorkflowSummaryDto"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+          cache:
+            ttl: 60
+            key_pattern: "{tenantId}:workflow:dashboard:summary"
+
+        - method: "GET"
+          path: "/my-pending"
+          summary: "Minhas pendências (aprovações + tarefas)"
+          operation_id: "getMyPendingItems"
+          response: "PendingItemsDto"
+          response_status: 200
+          description: "Retorna aprovações e tarefas pendentes do usuário autenticado"
+
+        - method: "GET"
+          path: "/overdue"
+          summary: "Instâncias com deadline vencido"
+          operation_id: "getOverdueInstances"
+          response: "WorkflowInstanceResponseDto[]"
+          response_status: 200
+          permissions: ["workflow.instance.read"]
+
+  # ── Permissões ───────────────────────────────────────────────────────────
+
+  permissions:
+    roles:
+      - id: "TENANT_ADMIN"
+        policies:
+          - "workflow.*"
+
+      - id: "TENANT_MANAGER"
+        inherits: ["TENANT_VIEWER"]
+        policies:
+          - "workflow.definition.create"
+          - "workflow.definition.update"
+          - "workflow.definition.publish"
+          - "workflow.instance.create"
+          - "workflow.instance.transition"
+          - "workflow.instance.cancel"
+          - "workflow.instance.manage"
+
+      - id: "TENANT_VIEWER"
+        policies:
+          - "workflow.definition.read"
+          - "workflow.instance.read"
+
+    permission_catalog:
+      - code: "workflow.definition.create"
+        description: "Criar definições de workflow"
+      - code: "workflow.definition.read"
+        description: "Consultar definições"
+      - code: "workflow.definition.update"
+        description: "Atualizar definições"
+      - code: "workflow.definition.delete"
+        description: "Remover definições"
+      - code: "workflow.definition.publish"
+        description: "Publicar definições"
+      - code: "workflow.instance.create"
+        description: "Criar instâncias de workflow"
+      - code: "workflow.instance.read"
+        description: "Consultar instâncias"
+      - code: "workflow.instance.transition"
+        description: "Executar transições"
+      - code: "workflow.instance.cancel"
+        description: "Cancelar instâncias"
+      - code: "workflow.instance.manage"
+        description: "Reatribuir e gerenciar instâncias"
+      - code: "workflow.instance.approve"
+        description: "Aprovar/rejeitar/delegar"
+
+    resource_based:
+      - action: "workflow.instance.approve"
+        constraint: "user.id == approval.assignedTo OR user.id == approval.delegatedTo"
+      - action: "workflow.instance.cancel"
+        constraint: "user.role in ['TENANT_ADMIN', 'TENANT_MANAGER'] OR user.id == instance.createdBy"
+      - action: "workflow.definition.publish"
+        constraint: "workflowDefinition.isPublished == false"
+
+  # ── Observabilidade ───────────────────────────────────────────────────────
+
+  observability:
+    logging:
+      level: "info"
+      format: "json"
+      include:
+        - "tenantId"
+        - "workflowInstanceId"
+        - "workflowSlug"
+        - "transitionSlug"
+        - "fromStage"
+        - "toStage"
+        - "executedBy"
+        - "duration_ms"
+      sensitive_fields: ["comment", "metadata"]
+
+    metrics:
+      - name: "bidflow_wf_instances_total"
+        type: "counter"
+        description: "Total de instâncias criadas"
+        labels: ["tenant_id", "workflow_slug"]
+
+      - name: "bidflow_wf_transitions_total"
+        type: "counter"
+        description: "Total de transições executadas"
+        labels: ["tenant_id", "workflow_slug", "transition_slug"]
+
+      - name: "bidflow_wf_instances_active"
+        type: "gauge"
+        description: "Instâncias ativas no momento"
+        labels: ["tenant_id", "workflow_slug"]
+
+      - name: "bidflow_wf_transition_duration_seconds"
+        type: "histogram"
+        description: "Duração da execução de transição"
+        labels: ["tenant_id"]
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 2]
+
+      - name: "bidflow_wf_approval_response_time_hours"
+        type: "histogram"
+        description: "Tempo de resposta de aprovação em horas"
+        labels: ["tenant_id"]
+        buckets: [1, 4, 8, 24, 48, 72]
+
+    tracing:
+      enabled: true
+      sampling_rate: 0.5
+      attributes:
+        - "tenant.id"
+        - "workflow.definition_id"
+        - "workflow.instance_id"
+        - "workflow.transition"
+        - "workflow.stage"
+
+    alerts:
+      - name: "WorkflowHighFailureRate"
+        condition: "rate(bidflow_wf_transitions_total{status='failed'}[5m]) > 5"
+        window: "5m"
+        severity: "warning"
+
+      - name: "WorkflowOverdueInstances"
+        condition: "count(instances where deadlineAt < now() AND status == ACTIVE) > 100"
+        window: "1h"
+        severity: "warning"
+
+  # ── Multi-tenant ─────────────────────────────────────────────────────────
+
+  multi_tenant:
+    isolation: "schema-per-tenant"
+    tenant_column: "tenant_id"
+    filter_mode: "automatic"
+    cache:
+      key_prefix: "{tenantId}:workflow:"
+    queues:
+      routing_key_template: "{tenantId}.workflow.{eventType}"
+
+  # ── Exemplos de Uso ──────────────────────────────────────────────────────
+
+  examples:
+    - id: "ex-create-definition"
+      description: "Criar workflow definition de aprovação de RFP"
+      request:
+        endpoint: "POST /api/v1/workflow/definitions"
+        body:
+          name: "Fluxo de Aprovação de RFP"
+          slug: "aprovacao-rfp"
+          entityType: "bidding.rfp"
+          stages:
+            - slug: "rascunho"
+              name: "Rascunho"
+              type: "INITIAL"
+              isInitial: true
+              order: 1
+              assignmentConfig: { mode: "USER" }
+            - slug: "revisao"
+              name: "Em Revisão"
+              type: "STANDARD"
+              order: 2
+              deadlineHours: 24
+            - slug: "aprovacao_diretor"
+              name: "Aprovação do Diretor"
+              type: "APPROVAL"
+              order: 3
+              approvalConfig: { mode: "ANY", requiredApprovals: 1, deadlineHours: 48 }
+            - slug: "aprovado"
+              name: "Aprovado"
+              type: "FINISH"
+              isFinal: true
+              order: 4
+          transitions:
+            - slug: "enviar_revisao"
+              name: "Enviar para Revisão"
+              fromStage: "rascunho"
+              toStage: "revisao"
+            - slug: "solicitar_aprovacao"
+              name: "Solicitar Aprovação"
+              fromStage: "revisao"
+              toStage: "aprovacao_diretor"
+              conditions: { requiresComment: true }
+            - slug: "aprovar"
+              name: "Aprovar"
+              fromStage: "aprovacao_diretor"
+              toStage: "aprovado"
+            - slug: "rejeitar"
+              name: "Rejeitar"
+              fromStage: "aprovacao_diretor"
+              toStage: "rascunho"
+      response:
+        status: 201
+        body:
+          id: "uuid"
+          name: "Fluxo de Aprovação de RFP"
+          slug: "aprovacao-rfp"
+          version: 1
+          isPublished: false
+
+    - id: "ex-create-instance"
+      description: "Iniciar workflow para uma RFP"
+      request:
+        endpoint: "POST /api/v1/workflow/instances"
+        body:
+          workflowDefinitionId: "uuid"
+          entityType: "bidding.rfp"
+          entityId: "uuid-rfp"
+          title: "Aprovação RFP #001 - Aquisição de Equipamentos"
+          priority: "HIGH"
+          data:
+            justification: "Contrato urgente para datacenter"
+            department: "TI"
+            totalValue: 500000
+      response:
+        status: 201
+        body:
+          id: "uuid"
+          currentStage: "rascunho"
+          status: "ACTIVE"
+          assignedTo: "uuid"
+          deadlineAt: null
+
+  # ── Testes ────────────────────────────────────────────────────────────────
+
+  tests:
+    unit:
+      required: true
+      coverage_minimum: 85
+      files:
+        - "src/workflow/domain/**/*.spec.ts"
+    integration:
+      required: true
+      files:
+        - "test/integration/workflow/definition-lifecycle.int-spec.ts"
+        - "test/integration/workflow/instance-flow.int-spec.ts"
+    e2e:
+      required: true
+      files:
+        - "test/e2e/workflow/full-workflow.e2e-spec.ts"
+    scenarios:
+      - id: "t-wf-full-cycle"
+        description: "Criar definição → publicar → criar instância → transicionar → aprovar → concluir"
+        type: "functional"
+        critical: true
+      - id: "t-wf-approval-modes"
+        description: "ANY, ALL e SEQUENTIAL resolvem corretamente"
+        type: "functional"
+      - id: "t-wf-mandatory-tasks"
+        description: "Transição bloqueada quando há tasks mandatory pendentes"
+        type: "functional"
+      - id: "t-wf-deadline"
+        description: "deadlineAt calculado e tracking de overdue funciona"
+        type: "functional"
+      - id: "t-wf-tenant-isolation"
+        description: "Workflows de tenant A não vistos por B"
+        type: "security"
+        critical: true
+
+  # ── Checklist de Implementação ────────────────────────────────────────────
+
+  checklist:
+    pre_implementation:
+      - "[ ] Spec revisada pelo Architecture Board"
+      - "[ ] Validação de DAG (grafo acíclico) projetada"
+      - "[ ] Estratégia de versionamento de definições definida"
+      - "[ ] Regras de auto-transition (event-driven) definidas"
+    implementation:
+      - "[ ] Aggregate: WorkflowDefinitionEntity (com versionamento)"
+      - "[ ] Entity: StageEntity (com approvalConfig, assignmentConfig)"
+      - "[ ] Entity: TransitionEntity (com condições e permissões)"
+      - "[ ] Aggregate: WorkflowInstanceEntity (com estado + deadlines)"
+      - "[ ] Entity: TransitionLog (append-only)"
+      - "[ ] Aggregate: ApprovalEntity (ANY/ALL/SEQUENTIAL)"
+      - "[ ] Entity: WorkflowAssignment"
+      - "[ ] Aggregate: WorkflowTaskEntity"
+      - "[ ] Entity: WorkflowTimelineEntry"
+      - "[ ] Serviço de validação de DAG (ciclo detection)"
+      - "[ ] Serviço de auto-transition (event-driven)"
+      - "[ ] Serviço de deadline tracking (scheduler)"
+      - "[ ] Serviço de aprovação (modos ANY/ALL/SEQUENTIAL)"
+    post_implementation:
+      - "[ ] Testes unitários >= 85%"
+      - "[ ] Testes de todos os modos de aprovação"
+      - "[ ] Testes de tenant isolation"
+      - "[ ] Documentação atualizada"

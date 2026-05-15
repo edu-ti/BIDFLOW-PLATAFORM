@@ -1,0 +1,1101 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec: Módulo de Licitações Core (Tendering V2)
+# =============================================================================
+# Especificação completa do núcleo operacional de gestão de licitações
+# públicas e privadas. Abrange todo o ciclo: captura, análise técnica e
+# financeira, viabilidade, documentação, proposta, disputa, resultado e
+# pós-licitação. Integrado com Workflow Engine, CRM e Notifications.
+# Schema version: 1.0 | Spec-Driven Development
+# =============================================================================
+
+spec:
+  id: "bidflow-tender-002"
+  title: "Módulo de Licitações Core (Tendering V2)"
+  version: "2.0.0"
+  status: draft
+  context: "tender"
+  author: "Architecture Board"
+  created: "2026-05-15"
+  updated: "2026-05-15"
+
+  tags:
+    - "tender"
+    - "core-domain"
+    - "multi-tenant"
+    - "event-driven"
+    - "workflow-integrated"
+
+  depends_on:
+    specs:
+      - "bidflow-auth-001"
+      - "bidflow-tenant-001"
+      - "bidflow-wf-001"
+      - "bidflow-crm-001"
+    services:
+      - "postgres"
+      - "redis"
+      - "rabbitmq"
+      - "storage"        # Document storage (S3/MinIO)
+      - "notifications"
+    apis:
+      - name: "Workflow Engine"
+        version: "v1"
+        contract: ".specify/specs/workflow/workflow-engine.yml"
+
+  overview: |
+    ## Descrição
+    Módulo core de licitações do BidFlow Platform. Gerencia o ciclo de vida
+    completo de licitações públicas e privadas: captura automática de editais,
+    análise técnica e financeira, viabilidade, checklist documental, aprovação
+    multicamada, preparação de proposta, disputa eletrônica em tempo real,
+    resultado e pós-licitação (recursos, contrato).
+
+    Integrado nativamente ao Workflow Engine (fluxos customizáveis por tenant),
+    ao CRM (leads → licitações, oportunidades → RFPs) e ao módulo de
+    Notifications (alertas de prazos, eventos, aprovações).
+
+    ## Objetivos de Negócio
+    1. Capturar licitações de 10+ fontes (DOU, ComprasNet, BEC, API, manual)
+    2. Analisar viabilidade técnica + financeira com score automatizado
+    3. Checklist documental inteligente com validação automática
+    4. Aprovação multicamada via Workflow Engine
+    5. Disputa eletrônica em tempo real com prorrogação automática
+    6. Pós-licitação: recursos, contratos, indicadores
+
+    ## Critérios de Sucesso
+    - Captura automática < 2 min
+    - Análise de viabilidade < 4h (score automatizado)
+    - Checklist 100% rastreável por item
+    - Proposta gerada em < 30 min com template
+    - Disputa com latência < 200ms (WebSocket)
+    - Timeline com 100% dos eventos registrados
+
+  modules:
+    - id: "tender-core"
+      name: "Licitações Core"
+      description: "Gestão do ciclo de vida completo de licitações"
+
+      entities:
+
+        # ════════════════════════════════════════════════════════════════════
+        # Aggregate Root: Tender
+        # ════════════════════════════════════════════════════════════════════
+        - id: "Tender"
+          name: "Licitação"
+          description: |
+            Aggregate root do módulo. Gerencia todo o ciclo de vida da
+            licitação. Cada Tender possui um workflowInstanceId vinculado
+            ao Workflow Engine, que controla os estágios de aprovação,
+            tarefas e deadlines. Os status refletem o estágio atual no
+            workflow, mantendo consistência eventual via eventos.
+          aggregate_root: true
+          persistence:
+            table: "tenders"
+            indexes:
+              - fields: ["tenant_id", "external_id"]
+                unique: true
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "modality"]
+              - fields: ["tenant_id", "uf"]
+              - fields: ["tenant_id", "organization"]
+              - fields: ["tenant_id", "opening_date"]
+              - fields: ["tenant_id", "closing_date"]
+              - fields: ["tenant_id", "assigned_to"]
+              - fields: ["tenant_id", "created_at"]
+              - fields: ["tenant_id", "workflow_instance_id"]
+            soft_delete: true
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "externalId"
+              type: "string"
+              required: false
+              max_length: 100
+              example: "DOU-2026-0012345"
+
+            - name: "source"
+              type: "enum"
+              required: true
+              default: "MANUAL"
+              values:
+                - "DOU"
+                - "COMPRASNET"
+                - "BEC"
+                - "LICITACOES_JSON"
+                - "API"
+                - "MANUAL"
+                - "IMPORT"
+
+            - name: "number"
+              type: "string"
+              required: true
+              max_length: 50
+              example: "001/2026"
+
+            - name: "organization"
+              type: "string"
+              required: true
+              max_length: 255
+
+            - name: "department"
+              type: "string"
+              required: false
+              max_length: 255
+
+            - name: "modality"
+              type: "enum"
+              required: true
+              values:
+                - "PREGAO_ELETRONICO"
+                - "PREGAO_PRESENCIAL"
+                - "CONCORRENCIA"
+                - "TOMADA_PRECOS"
+                - "CONVITE"
+                - "CONCURSO"
+                - "LEILAO"
+                - "RDC"
+                - "DISPENSA"
+                - "INEXIGIBILIDADE"
+
+            - name: "type"
+              type: "enum"
+              required: true
+              default: "MENOR_PRECO"
+              values:
+                - "MENOR_PRECO"
+                - "MAIOR_DESCONTO"
+                - "MELHOR_TECNICA"
+                - "TECNICA_PRECO"
+                - "MAIOR_LANCE"
+                - "MAIOR_OFERTA"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "CAPTURED"
+              values:
+                - "CAPTURED"
+                - "ANALYZING"
+                - "VIABILITY_ANALYSIS"
+                - "DOCUMENTATION"
+                - "APPROVAL"
+                - "PROPOSAL"
+                - "SUBMITTED"
+                - "DISPUTE"
+                - "RESULT_AWAITED"
+                - "WON"
+                - "LOST"
+                - "APPEAL"
+                - "CONTRACTED"
+                - "CANCELLED"
+                - "ARCHIVED"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 500
+
+            - name: "description"
+              type: "text"
+              required: false
+
+            - name: "uf"
+              type: "string"
+              required: false
+              max_length: 2
+
+            - name: "city"
+              type: "string"
+              required: false
+              max_length: 100
+
+            - name: "estimatedValue"
+              type: "decimal"
+              required: false
+              precision: 14
+              scale: 2
+
+            - name: "currency"
+              type: "string"
+              required: true
+              default: "BRL"
+
+            - name: "openingDate"
+              type: "datetime"
+              required: true
+
+            - name: "closingDate"
+              type: "datetime"
+              required: true
+
+            - name: "disputeDate"
+              type: "datetime"
+              required: false
+
+            - name: "publicationDate"
+              type: "date"
+              required: false
+
+            - name: "documentUrl"
+              type: "string"
+              required: false
+              max_length: 1000
+
+            - name: "workflowInstanceId"
+              type: "uuid"
+              required: false
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+
+            - name: "assignedTeam"
+              type: "json"
+              required: false
+              example: '{"analyst": "uuid", "coordinator": "uuid", "reviewer": "uuid", "approver": "uuid"}'
+
+            - name: "score"
+              type: "integer"
+              required: false
+              min: 0
+              max: 100
+              description: "Score de viabilidade (0-100)"
+
+            - name: "scoreCriteria"
+              type: "json"
+              required: false
+              example: '{"technicalFit": 80, "financialFit": 70, "strategicValue": 90, "risk": 60}'
+
+            - name: "tags"
+              type: "json"
+              required: false
+              default: "[]"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "customFields"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "notes"
+              type: "text"
+              required: false
+
+            - name: "deletedAt"
+              type: "datetime"
+              required: false
+
+            - name: "createdBy"
+              type: "uuid"
+              required: true
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "closingDate > openingDate"
+            - "externalId único dentro do tenant"
+            - "status WON exige TenderResult com winner"
+            - "score entre 0 e 100, apenas se status = VIABILITY_ANALYSIS"
+            - "workflowInstanceId vinculado ao Workflow Engine ao entrar em ANALYSIS"
+
+          relationships:
+            - type: "has_many"  entity: "TenderItem"          via: "tenderId"
+            - type: "has_many"  entity: "TenderDocument"      via: "tenderId"
+            - type: "has_many"  entity: "TenderParticipation" via: "tenderId"
+            - type: "has_many"  entity: "TenderProposal"      via: "tenderId"
+            - type: "has_many"  entity: "TenderChecklist"     via: "tenderId"
+            - type: "has_many"  entity: "TenderDeadline"      via: "tenderId"
+            - type: "has_many"  entity: "TenderTimelineEntry" via: "tenderId"
+            - type: "has_many"  entity: "TenderAnalysis"      via: "tenderId"
+            - type: "has_one"   entity: "TenderResult"        via: "tenderId"
+            - type: "has_one"   entity: "TenderDispute"       via: "tenderId"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderItem
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderItem"
+          name: "Item da Licitação"
+          aggregate_root: false
+          persistence:
+            table: "tender_items"
+            indexes:
+              - fields: ["tender_id", "number"]
+                unique: true
+              - fields: ["tender_id", "category"]
+          attributes:
+            - name: "id"             type: "uuid"         required: true
+            - name: "tenderId"       type: "uuid"         required: true
+            - name: "number"         type: "integer"      required: true
+            - name: "description"    type: "text"         required: true
+            - name: "quantity"       type: "decimal"      required: true  precision: 12  scale: 4
+            - name: "unit"           type: "string"       required: true  max_length: 50
+            - name: "estimatedValue" type: "decimal"      required: false precision: 14  scale: 2
+            - name: "proposalValue"  type: "decimal"      required: false precision: 14  scale: 2
+            - name: "bidValue"       type: "decimal"      required: false precision: 14  scale: 2
+            - name: "category"       type: "string"       required: false max_length: 100
+            - name: "specifications" type: "json"         required: false
+            - name: "hasDispute"     type: "boolean"      required: true  default: false
+            - name: "winner"         type: "boolean"      required: false
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderDocument
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderDocument"
+          name: "Documento"
+          description: "Documento com versionamento. Substituição cria nova versão. Apenas 1 versão ativa por vez."
+          aggregate_root: false
+          persistence:
+            table: "tender_documents"
+            indexes:
+              - fields: ["tender_id", "category"]
+              - fields: ["tender_id", "checklist_item_id"]
+              - fields: ["tender_id", "is_latest"]
+          attributes:
+            - name: "id"               type: "uuid"       required: true
+            - name: "tenderId"         type: "uuid"       required: true
+            - name: "checklistItemId"  type: "uuid"       required: false
+            - name: "category"         type: "enum"       required: true
+              values: ["EDITTAL", "ANNEX", "PROPOSAL", "TECHNICAL_DOC", "LEGAL_DOC", "FINANCIAL_DOC", "REGULARITY_CERTIFICATE", "BALANCE_SHEET", "CONTRACT", "OTHER"]
+            - name: "title"            type: "string"     required: true  max_length: 300
+            - name: "description"      type: "text"       required: false
+            - name: "fileName"         type: "string"     required: true  max_length: 500
+            - name: "fileSize"         type: "integer"    required: true
+            - name: "fileType"         type: "string"     required: true  max_length: 50
+            - name: "fileUrl"          type: "string"     required: true  max_length: 2000
+            - name: "fileHash"         type: "string"     required: false max_length: 64
+            - name: "version"          type: "integer"    required: true  default: 1
+            - name: "isLatest"         type: "boolean"    required: true  default: true
+            - name: "status"           type: "enum"       required: true  default: "PENDING"
+              values: ["PENDING", "VALIDATED", "REJECTED", "REPLACED"]
+            - name: "validatedBy"      type: "uuid"       required: false
+            - name: "validatedAt"      type: "datetime"   required: false
+            - name: "rejectionReason"  type: "string"     required: false max_length: 500
+            - name: "uploadedBy"       type: "uuid"       required: true
+            - name: "createdAt"        type: "datetime"   required: true  default: "now()"
+          invariants:
+            - "status REPLACED exige version > 1"
+            - "apenas 1 documento pode ser isLatest = true por (tenderId, category, checklistItemId)"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Aggregate Root: TenderAnalysis
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderAnalysis"
+          name: "Análise Técnica e Financeira"
+          description: |
+            Registro de análise de viabilidade técnica e financeira da
+            licitação. Gerado automaticamente ou manual. Compreende
+            análise de edital, pesquisa de preços, risco, concorrência
+            e score consolidado. Alimenta o score do Tender.
+          aggregate_root: true
+          persistence:
+            table: "tender_analyses"
+            indexes:
+              - fields: ["tender_id", "type"]
+                unique: true
+              - fields: ["tender_id"]
+              - fields: ["tender_id", "analyst_id"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"                type: "uuid"       required: true
+            - name: "tenderId"          type: "uuid"       required: true
+            - name: "type"              type: "enum"       required: true
+              values: ["TECHNICAL", "FINANCIAL", "INTEGRATED"]
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "IN_PROGRESS"
+              values: ["IN_PROGRESS", "COMPLETED", "REJECTED"]
+
+            - name: "analystId"         type: "uuid"       required: true
+            - name: "analystName"       type: "string"     required: false max_length: 255
+
+            # Technical analysis
+            - name: "technicalScore"    type: "integer"    required: false min: 0  max: 100
+            - name: "objectFit"         type: "integer"    required: false min: 0  max: 100
+            - name: "requirementsFit"   type: "integer"    required: false min: 0  max: 100
+            - name: "experienceRequired" type: "boolean"   required: false
+
+            # Financial analysis
+            - name: "financialScore"    type: "integer"    required: false min: 0  max: 100
+            - name: "estimatedCost"     type: "decimal"    required: false precision: 14  scale: 2
+            - name: "suggestedMargin"   type: "decimal"    required: false precision: 5  scale: 2
+            - name: "competitionLevel"  type: "enum"       required: false
+              values: ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"]
+            - name: "riskLevel"         type: "enum"       required: false
+              values: ["LOW", "MEDIUM", "HIGH"]
+
+            - name: "conclusion"        type: "text"       required: false
+            - name: "recommendation"    type: "enum"       required: false
+              values: ["PARTICIPATE", "NOT_PARTICIPATE", "CONDITIONAL"]
+
+            - name: "priceResearch"
+              type: "json"
+              required: false
+              description: "Pesquisa de preços"
+              example: '{"sources": [{"name": "ComprasNet", "value": 500000}, {"name": "Banco de Preços", "value": 480000}], "averagePrice": 490000}'
+
+            - name: "competitors"
+              type: "json"
+              required: false
+              example: '{"known": ["Concorrente A", "Concorrente B"], "estimatedCount": 5}'
+
+            - name: "attachments"
+              type: "json"
+              required: false
+              description: "Anexos da análise"
+              example: '["url-pesquisa-precos.pdf", "url-memoria-calculo.xlsx"]'
+
+            - name: "completedAt"       type: "datetime"   required: false
+            - name: "completedBy"       type: "uuid"       required: false
+            - name: "createdBy"         type: "uuid"       required: true
+            - name: "createdAt"         type: "datetime"   required: true  default: "now()"
+            - name: "updatedAt"         type: "datetime"   required: true  default: "now()"
+
+          invariants:
+            - "technicalScore e financialScore entre 0 e 100"
+            - "type TECHNICAL exige technicalScore e objectFit"
+            - "type FINANCIAL exige financialScore e estimatedCost"
+            - "status COMPLETED exige recommendation preenchido"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderChecklist
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderChecklist"
+          name: "Checklist da Licitação"
+          description: "Item de checklist operacional. Bloqueia avanço no workflow se isMandatory pendente."
+          aggregate_root: false
+          persistence:
+            table: "tender_checklists"
+            indexes:
+              - fields: ["tender_id", "status"]
+              - fields: ["tender_id", "assigned_to"]
+              - fields: ["tender_id", "category"]
+          attributes:
+            - name: "id"              type: "uuid"       required: true
+            - name: "tenderId"        type: "uuid"       required: true
+            - name: "category"        type: "enum"       required: true  default: "DOCUMENTATION"
+              values: ["DOCUMENTATION", "LEGAL", "TECHNICAL", "FINANCIAL", "OPERATIONAL", "APPROVAL", "POST_TENDER"]
+            - name: "title"           type: "string"     required: true  max_length: 300
+            - name: "description"     type: "text"       required: false
+            - name: "status"          type: "enum"       required: true  default: "PENDING"
+              values: ["PENDING", "IN_PROGRESS", "COMPLETED", "WAIVED", "NOT_APPLICABLE"]
+            - name: "isMandatory"     type: "boolean"    required: true  default: true
+            - name: "order"           type: "integer"    required: true  default: 0
+            - name: "assignedTo"      type: "uuid"       required: false
+            - name: "completedAt"     type: "datetime"   required: false
+            - name: "completedBy"     type: "uuid"       required: false
+            - name: "notes"           type: "text"       required: false
+            - name: "autoGenerated"   type: "boolean"    required: true  default: false
+            - name: "createdAt"       type: "datetime"   required: true  default: "now()"
+            - name: "updatedAt"       type: "datetime"   required: true  default: "now()"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Aggregate Root: TenderProposal
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderProposal"
+          name: "Proposta"
+          description: "Proposta comercial e técnica. Suporta versionamento. isSubmitted = true congela."
+          aggregate_root: true
+          persistence:
+            table: "tender_proposals"
+            indexes:
+              - fields: ["tender_id", "version"]
+                unique: true
+              - fields: ["tender_id", "is_submitted"]
+          attributes:
+            - name: "id"                type: "uuid"        required: true
+            - name: "tenderId"          type: "uuid"        required: true
+            - name: "version"           type: "integer"     required: true  default: 1
+            - name: "isSubmitted"       type: "boolean"     required: true  default: false
+            - name: "submittedAt"       type: "datetime"    required: false
+            - name: "submittedBy"       type: "uuid"        required: false
+            - name: "totalValue"        type: "decimal"     required: true  precision: 14  scale: 2
+            - name: "discountPercent"   type: "decimal"     required: false precision: 5  scale: 2
+            - name: "itemValues"        type: "json"        required: false
+              example: '[{"itemNumber": 1, "value": 50000}, {"itemNumber": 2, "value": 30000}]'
+            - name: "technicalProposal" type: "json"        required: false
+            - name: "commercialTerms"   type: "json"        required: false
+            - name: "observations"      type: "text"        required: false
+            - name: "signature"         type: "json"        required: false
+            - name: "createdBy"         type: "uuid"        required: true
+            - name: "createdAt"         type: "datetime"    required: true  default: "now()"
+            - name: "updatedAt"         type: "datetime"    required: true  default: "now()"
+          invariants:
+            - "isSubmitted = true → nenhum campo pode ser alterado"
+            - "sum(itemValues.value) == totalValue"
+            - "totalValue >= 0"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Aggregate Root: TenderDispute
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderDispute"
+          name: "Disputa Eletrônica"
+          description: "Disputa em tempo real com prorrogação automática. Conectada via WebSocket."
+          aggregate_root: true
+          persistence:
+            table: "tender_disputes"
+            indexes:
+              - fields: ["tender_id"]
+                unique: true
+          attributes:
+            - name: "id"               type: "uuid"       required: true
+            - name: "tenderId"         type: "uuid"       required: true  unique: true
+            - name: "status"           type: "enum"       required: true  default: "SCHEDULED"
+              values: ["SCHEDULED", "OPEN", "EXTENDED", "CLOSED", "CANCELLED"]
+            - name: "startPrice"       type: "decimal"    required: true  precision: 14  scale: 2
+            - name: "currentPrice"     type: "decimal"    required: true  precision: 14  scale: 2
+            - name: "minDecrement"     type: "decimal"    required: true  precision: 10  scale: 2
+            - name: "extensionTime"    type: "integer"    required: true  default: 180
+            - name: "startedAt"        type: "datetime"   required: false
+            - name: "closedAt"         type: "datetime"   required: false
+            - name: "winnerId"         type: "uuid"       required: false
+            - name: "winnerAmount"     type: "decimal"    required: false precision: 14  scale: 2
+            - name: "totalBids"        type: "integer"    required: true  default: 0
+            - name: "extensions"       type: "integer"    required: true  default: 0
+            - name: "metadata"         type: "json"       required: false default: "{}"
+          invariants:
+            - "currentPrice <= startPrice"
+            - "minDecrement > 0"
+            - "status OPEN → startedAt preenchido"
+            - "status CLOSED → closedAt preenchido"
+
+        - id: "TenderDisputeBid"
+          name: "Lance da Disputa"
+          aggregate_root: false
+          persistence:
+            table: "tender_dispute_bids"
+            indexes:
+              - fields: ["dispute_id", "created_at"]
+              - fields: ["dispute_id", "supplier_id"]
+          attributes:
+            - name: "id"              type: "uuid"       required: true
+            - name: "disputeId"       type: "uuid"       required: true
+            - name: "supplierId"      type: "uuid"       required: true
+            - name: "amount"          type: "decimal"    required: true  precision: 14  scale: 2
+            - name: "previousAmount"  type: "decimal"    required: false precision: 14  scale: 2
+            - name: "isAutomatic"     type: "boolean"    required: true  default: false
+            - name: "isWinner"        type: "boolean"    required: false
+            - name: "timestamp"       type: "datetime"   required: true  default: "now()"
+            - name: "round"           type: "integer"    required: true
+          invariants:
+            - "amount < previousAmount (quando previousAmount existe)"
+            - "amount <= currentPrice - minDecrement"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Aggregate Root: TenderResult
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderResult"
+          name: "Resultado"
+          description: "Resultado oficial. Registra classificação, valores, fornecedores."
+          aggregate_root: true
+          persistence:
+            table: "tender_results"
+            indexes:
+              - fields: ["tender_id"]
+                unique: true
+          attributes:
+            - name: "id"                type: "uuid"       required: true
+            - name: "tenderId"          type: "uuid"       required: true  unique: true
+            - name: "status"            type: "enum"       required: true  default: "PENDING"
+              values: ["PENDING", "CLASSIFIED", "WINNER", "LOSER", "DISQUALIFIED", "APPEAL", "CONTRACTED"]
+            - name: "classification"    type: "integer"    required: false
+            - name: "totalScore"        type: "decimal"    required: false precision: 10  scale: 2
+            - name: "technicalScore"    type: "decimal"    required: false precision: 10  scale: 2
+            - name: "commercialScore"   type: "decimal"    required: false precision: 10  scale: 2
+            - name: "winnerValue"       type: "decimal"    required: false precision: 14  scale: 2
+            - name: "winnerName"        type: "string"     required: false max_length: 255
+            - name: "winnerDocument"    type: "string"     required: false max_length: 20
+            - name: "rankings"          type: "json"       required: false
+              example: '[{"position": 1, "supplierName": "Empresa X", "score": 95.5, "value": 500000}]'
+            - name: "announcedAt"       type: "datetime"   required: false
+            - name: "appealDeadline"    type: "datetime"   required: false
+            - name: "contractSignedAt"  type: "datetime"   required: false
+            - name: "observations"      type: "text"       required: false
+            - name: "createdAt"         type: "datetime"   required: true  default: "now()"
+            - name: "updatedAt"         type: "datetime"   required: true  default: "now()"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderParticipation
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderParticipation"
+          name: "Participação"
+          aggregate_root: false
+          persistence:
+            table: "tender_participations"
+            indexes:
+              - fields: ["tender_id", "supplier_id"]
+                unique: true
+              - fields: ["tender_id", "status"]
+          attributes:
+            - name: "id"               type: "uuid"       required: true
+            - name: "tenderId"         type: "uuid"       required: true
+            - name: "supplierId"       type: "uuid"       required: true
+            - name: "supplierName"     type: "string"     required: true  max_length: 255
+            - name: "supplierDocument"  type: "string"    required: true  max_length: 20
+            - name: "status"           type: "enum"       required: true  default: "REGISTERED"
+              values: ["REGISTERED", "QUALIFIED", "DISQUALIFIED", "WITHDREW", "WINNER", "CONTRACTED"]
+            - name: "hasProposal"      type: "boolean"    required: true  default: false
+            - name: "bidCount"         type: "integer"    required: true  default: 0
+            - name: "createdAt"        type: "datetime"   required: true  default: "now()"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderDeadline
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderDeadline"
+          name: "Prazo"
+          description: "Prazo crítico com notificação programada"
+          aggregate_root: false
+          persistence:
+            table: "tender_deadlines"
+            indexes:
+              - fields: ["tender_id", "deadline_at"]
+              - fields: ["tender_id", "type", "status"]
+          attributes:
+            - name: "id"              type: "uuid"       required: true
+            - name: "tenderId"        type: "uuid"       required: true
+            - name: "type"            type: "enum"       required: true
+              values: ["OPENING", "CLOSING", "DISPUTE", "DOCUMENT_DEADLINE", "APPEAL", "CONTRACT_SIGNING", "CUSTOM"]
+            - name: "title"           type: "string"     required: true  max_length: 300
+            - name: "deadlineAt"      type: "datetime"   required: true
+            - name: "notifyBefore"    type: "integer"    required: false
+              description: "Notificar N horas antes"
+            - name: "notifiedAt"      type: "datetime"   required: false
+            - name: "status"          type: "enum"       required: true  default: "PENDING"
+              values: ["PENDING", "NOTIFIED", "COMPLETED", "OVERDUE"]
+            - name: "createdAt"       type: "datetime"   required: true  default: "now()"
+
+        # ════════════════════════════════════════════════════════════════════
+        # Entity: TenderTimelineEntry
+        # ════════════════════════════════════════════════════════════════════
+        - id: "TenderTimelineEntry"
+          name: "Entrada de Timeline"
+          description: "Registro imutável (append-only) de cada evento do ciclo de vida"
+          aggregate_root: false
+          persistence:
+            table: "tender_timeline_entries"
+            indexes:
+              - fields: ["tender_id", "occurred_at"]
+              - fields: ["tender_id", "type"]
+          attributes:
+            - name: "id"          type: "uuid"       required: true
+            - name: "tenderId"    type: "uuid"       required: true
+            - name: "type"        type: "enum"       required: true
+              values:
+                - "CAPTURED" | "ANALYSIS_STARTED" | "VIABILITY_APPROVED" | "VIABILITY_REJECTED"
+                | "DOCUMENT_UPLOADED" | "DOCUMENT_VALIDATED" | "DOCUMENT_REJECTED"
+                | "CHECKLIST_ITEM_COMPLETED" | "PROPOSAL_CREATED" | "PROPOSAL_SUBMITTED"
+                | "DISPUTE_STARTED" | "DISPUTE_BID" | "DISPUTE_EXTENDED" | "DISPUTE_FINISHED"
+                | "RESULT_PUBLISHED" | "WON" | "LOST" | "APPEAL_FILED" | "CONTRACT_SIGNED"
+                | "TENDER_CANCELLED" | "STATUS_CHANGED" | "ASSIGNMENT_CHANGED"
+                | "NOTE_ADDED" | "DEADLINE_UPDATED" | "SYSTEM_EVENT"
+            - name: "title"       type: "string"     required: true  max_length: 300
+            - name: "description" type: "text"       required: false
+            - name: "occurredAt"  type: "datetime"   required: true  default: "now()"
+            - name: "createdBy"   type: "uuid"       required: false
+            - name: "metadata"    type: "json"       required: false default: "{}"
+            - name: "createdAt"   type: "datetime"   required: true  default: "now()"
+
+      value_objects:
+        - id: "TenderModality"
+          attributes:
+            - name: "type" type: "enum"
+              values: ["PREGAO_ELETRONICO", "PREGAO_PRESENCIAL", "CONCORRENCIA", "TOMADA_PRECOS", "CONVITE", "CONCURSO", "LEILAO", "RDC", "DISPENSA", "INEXIGIBILIDADE"]
+            - name: "isElectronic" type: "boolean" default: true
+
+        - id: "TenderValue"
+          attributes:
+            - name: "amount" type: "decimal" precision: 14 scale: 2
+            - name: "currency" type: "string" default: "BRL"
+
+        - id: "AnalysisScore"
+          attributes:
+            - name: "technicalFit" type: "integer" min: 0 max: 100
+            - name: "financialFit" type: "integer" min: 0 max: 100
+            - name: "strategicValue" type: "integer" min: 0 max: 100
+            - name: "risk" type: "integer" min: 0 max: 100
+
+  business_rules:
+    - id: "TND-BR-001"  title: "Datas consistentes"
+      description: "closingDate deve ser posterior a openingDate"
+      scope: "Tender"  type: "hard"  error_code: "INVALID_DATES"
+
+    - id: "TND-BR-002"  title: "Proposta submetida é imutável"
+      description: "isSubmitted = true bloqueia alterações"
+      scope: "TenderProposal"  type: "hard"  error_code: "PROPOSAL_ALREADY_SUBMITTED"
+
+    - id: "TND-BR-003"  title: "Checklist completo para submeter"
+      description: "Todos os itens isMandatory do checklist devem estar COMPLETED ou WAIVED"
+      scope: "Tender"  type: "hard"  error_code: "CHECKLIST_INCOMPLETE"
+
+    - id: "TND-BR-004"  title: "Disputa requer proposta submetida"
+      description: "Pelo menos 1 proposta submetida antes de abrir disputa"
+      scope: "TenderDispute"  type: "hard"  error_code: "NO_PROPOSAL_FOR_DISPUTE"
+
+    - id: "TND-BR-005"  title: "Decremento mínimo na disputa"
+      description: "Lance deve ser inferior ao currentPrice em pelo menos minDecrement"
+      scope: "TenderDisputeBid"  type: "hard"  error_code: "BID_BELOW_MIN_DECREMENT"
+
+    - id: "TND-BR-006"  title: "Valor total vs itens"
+      description: "Soma dos valores dos itens deve corresponder ao totalValue"
+      scope: "TenderProposal"  type: "hard"  error_code: "PROPOSAL_VALUE_MISMATCH"
+
+    - id: "TND-BR-007"  title: "Documento único por categoria"
+      description: "Apenas 1 isLatest = true por (tenderId, category, checklistItemId)"
+      scope: "TenderDocument"  type: "hard"  error_code: "DUPLICATE_DOCUMENT"
+
+    - id: "TND-BR-008"  title: "Score de viabilidade"
+      description: "Score só pode ser calculado após TenderAnalysis COMPLETED"
+      scope: "Tender"  type: "hard"  error_code: "ANALYSIS_NOT_COMPLETED"
+
+    - id: "TND-BR-009"  title: "Prorrogação automática"
+      description: "Lance nos últimos extensionTime segundos prorroga a disputa"
+      scope: "TenderDispute"  type: "hard"  error_code: ""
+
+    - id: "TND-BR-010"  title: "Prazo de recurso"
+      description: "Recurso contra resultado deve ser interposto em até 5 dias úteis"
+      scope: "TenderResult"  type: "hard"  error_code: "APPEAL_DEADLINE_EXCEEDED"
+
+  workflows:
+    - id: "wf-tender-lifecycle"
+      name: "Ciclo de Vida da Licitação"
+      trigger: "TenderCaptured"
+      workflow_engine: true
+      workflow_definition_slug: "tender-lifecycle"
+      stages:
+        - id: "CAPTURED"                label: "Capturada"               initial: true
+        - id: "ANALYZING"               label: "Em Análise"
+        - id: "VIABILITY_ANALYSIS"      label: "Análise de Viabilidade"
+        - id: "DOCUMENTATION"           label: "Documentação"
+        - id: "APPROVAL"                label: "Aprovação"               approval: true
+        - id: "PROPOSAL"                label: "Proposta"
+        - id: "SUBMITTED"               label: "Proposta Submetida"
+        - id: "DISPUTE"                 label: "Disputa"
+        - id: "RESULT_AWAITED"          label: "Aguardando Resultado"
+        - id: "WON"                     label: "Vencida"                 final: true
+        - id: "LOST"                    label: "Perdida"                 final: true
+        - id: "CANCELLED"               label: "Cancelada"              final: true
+
+  events:
+    - id: "evt-tender-captured"
+      name: "TenderCaptured"
+      version: "v1"
+      type: "com.bidflow.tender.captured.v1"
+      routing_key: "{tenantId}.tender.captured"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            tenderId: { type: "uuid" }
+            number: { type: "string" }
+            organization: { type: "string" }
+            modality: { type: "string" }
+            estimatedValue: { type: "decimal" }
+            openingDate: { type: "datetime" }
+            closingDate: { type: "datetime" }
+      consumers:
+        - service: "workflow-engine"  handler: "startTenderWorkflow"         async: true
+        - service: "crm"              handler: "createOpportunityFromTender" async: true
+
+    - id: "evt-tender-analysis-completed"
+      name: "TenderAnalysisCompleted"
+      version: "v1"
+      type: "com.bidflow.tender.analysis.completed.v1"
+      routing_key: "{tenantId}.tender.analysis.completed"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            tenderId: { type: "uuid" }
+            analysisId: { type: "uuid" }
+            technicalScore: { type: "integer" }
+            financialScore: { type: "integer" }
+            recommendation: { type: "string" }
+
+    - id: "evt-tender-proposal-submitted"
+      name: "TenderProposalSubmitted"
+      version: "v1"
+      type: "com.bidflow.tender.proposal.submitted.v1"
+      routing_key: "{tenantId}.tender.proposal.submitted"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            tenderId: { type: "uuid" }
+            proposalId: { type: "uuid" }
+            totalValue: { type: "decimal" }
+            version: { type: "integer" }
+      consumers:
+        - service: "workflow-engine"  handler: "advanceTenderStage" async: true
+
+    - id: "evt-tender-dispute-bid"
+      name: "TenderDisputeBidPlaced"
+      version: "v1"
+      type: "com.bidflow.tender.dispute.bid.v1"
+      routing_key: "{tenantId}.tender.dispute.bid"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            disputeId: { type: "uuid" }
+            supplierId: { type: "uuid" }
+            amount: { type: "decimal" }
+            round: { type: "integer" }
+            isAutomatic: { type: "boolean" }
+      consumers:
+        - service: "websocket"      handler: "broadcastBid"           async: true
+        - service: "notifications"  handler: "notifyOutbidSupplier"   async: true
+
+    - id: "evt-tender-dispute-finished"
+      name: "TenderDisputeFinished"
+      version: "v1"
+      type: "com.bidflow.tender.dispute.finished.v1"
+      routing_key: "{tenantId}.tender.dispute.finished"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            disputeId: { type: "uuid" }
+            tenderId: { type: "uuid" }
+            totalBids: { type: "integer" }
+            winnerAmount: { type: "decimal" }
+
+    - id: "evt-tender-won"
+      name: "TenderWon"
+      version: "v1"
+      type: "com.bidflow.tender.won.v1"
+      routing_key: "{tenantId}.tender.won"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            tenderId: { type: "uuid" }
+            winnerValue: { type: "decimal" }
+            classification: { type: "integer" }
+            contractValue: { type: "decimal" }
+      consumers:
+        - service: "crm"              handler: "updateOpportunityPipeline"  async: true
+        - service: "notifications"    handler: "notifyWinTeam"              async: true
+
+    - id: "evt-tender-lost"
+      name: "TenderLost"
+      version: "v1"
+      type: "com.bidflow.tender.lost.v1"
+      routing_key: "{tenantId}.tender.lost"
+      payload:
+        eventId: { type: "uuid" }
+        aggregateId: { type: "uuid" }
+        tenantId: { type: "uuid" }
+        timestamp: { type: "datetime" }
+        data:
+          type: "object"
+          properties:
+            tenderId: { type: "uuid" }
+            classification: { type: "integer" }
+            winnerName: { type: "string" }
+            winnerValue: { type: "decimal" }
+            observations: { type: "string" }
+      consumers:
+        - service: "crm"              handler: "updateOpportunityPipeline"  async: true
+        - service: "analytics"        handler: "recordLossReason"           async: true
+
+  apis:
+    - controller: "TendersController"
+      prefix: "/api/v1/tenders"
+      auth: "required"
+      tenant_isolation: true
+      endpoints:
+        - method: "POST"   path: "/"                      summary: "Capturar licitação"
+          operation_id: "captureTender"  response_status: 201  permissions: ["tender.create"]
+        - method: "GET"    path: "/"                      summary: "Listar licitações"
+          operation_id: "listTenders"    permissions: ["tender.read"]
+          pagination: true  filters: ["status", "modality", "uf", "organization", "assignedTo", "date_from", "date_to", "search"]
+        - method: "GET"    path: "/:id"                   summary: "Obter licitação"
+          operation_id: "getTender"      permissions: ["tender.read"]
+        - method: "PATCH"  path: "/:id"                   summary: "Atualizar"
+          operation_id: "updateTender"   permissions: ["tender.update"]
+        - method: "POST"   path: "/:id/transition"        summary: "Transicionar status (Workflow)"
+          operation_id: "transitionTender" permissions: ["tender.transition"]
+        - method: "POST"   path: "/:id/assign"            summary: "Atribuir responsável"
+          operation_id: "assignTender"   permissions: ["tender.manage"]
+        - method: "POST"   path: "/:id/cancel"            summary: "Cancelar"
+          operation_id: "cancelTender"   permissions: ["tender.manage"]
+
+    - controller: "TenderAnalysisController"
+      prefix: "/api/v1/tenders/:tenderId/analysis"
+      auth: "required"
+      endpoints:
+        - method: "POST"   path: "/"                      summary: "Criar análise"
+          operation_id: "createAnalysis" response_status: 201 permissions: ["tender.analysis"]
+        - method: "GET"    path: "/"                      summary: "Listar análises"
+          operation_id: "listAnalysis"   permissions: ["tender.read"]
+        - method: "POST"   path: "/:id/complete"          summary: "Concluir análise"
+          operation_id: "completeAnalysis" permissions: ["tender.analysis"]
+
+    - controller: "TenderDocumentsController"
+      prefix: "/api/v1/tenders/:tenderId/documents"
+      auth: "required"
+      endpoints:
+        - method: "POST"   path: "/"                      summary: "Upload"
+          operation_id: "uploadDocument" response_status: 201 permissions: ["tender.document.upload"]
+        - method: "GET"    path: "/"                      summary: "Listar"
+          operation_id: "listDocuments"  permissions: ["tender.read"]
+        - method: "POST"   path: "/:id/validate"          summary: "Validar"
+          operation_id: "validateDocument" permissions: ["tender.document.validate"]
+        - method: "POST"   path: "/:id/reject"            summary: "Rejeitar"
+          operation_id: "rejectDocument"  permissions: ["tender.document.validate"]
+        - method: "POST"   path: "/:id/replace"           summary: "Substituir (nova versão)"
+          operation_id: "replaceDocument" permissions: ["tender.document.upload"]
+        - method: "GET"    path: "/:id/versions"           summary: "Versões"
+          operation_id: "listDocumentVersions" permissions: ["tender.read"]
+
+    - controller: "TenderProposalsController"
+      prefix: "/api/v1/tenders/:tenderId/proposals"
+      auth: "required"
+      endpoints:
+        - method: "POST"   path: "/"                      summary: "Criar proposta"
+          operation_id: "createProposal" response_status: 201 permissions: ["tender.proposal.create"]
+        - method: "GET"    path: "/"                      summary: "Listar versões"
+          operation_id: "listProposals"  permissions: ["tender.read"]
+        - method: "PATCH"  path: "/:id"                   summary: "Atualizar rascunho"
+          operation_id: "updateProposal" permissions: ["tender.proposal.create"]
+        - method: "POST"   path: "/:id/submit"            summary: "Submeter"
+          operation_id: "submitProposal" permissions: ["tender.proposal.submit"]
+        - method: "GET"    path: "/:id/items"              summary: "Itens da proposta"
+          operation_id: "getProposalItems" permissions: ["tender.read"]
+
+    - controller: "TenderDisputesController"
+      prefix: "/api/v1/tenders/:tenderId/dispute"
+      auth: "required"
+      endpoints:
+        - method: "GET"    path: "/"                      summary: "Obter disputa"
+          operation_id: "getDispute"     permissions: ["tender.read"]
+        - method: "GET"    path: "/bids"                  summary: "Histórico de lances"
+          operation_id: "listBids"       permissions: ["tender.read"]
+        - method: "POST"   path: "/bid"                   summary: "Registrar lance"
+          operation_id: "placeBid"       permissions: ["tender.dispute.bid"]
+          rate_limit: { by: "user", max: 30, window: "60s" }
+
+    - controller: "TenderChecklistsController"
+      prefix: "/api/v1/tenders/:tenderId/checklist"
+      auth: "required"
+      endpoints:
+        - method: "GET"    path: "/"                      summary: "Listar checklist"
+          operation_id: "listChecklist" permissions: ["tender.read"]
+        - method: "PATCH"  path: "/:id"                   summary: "Atualizar item"
+          operation_id: "updateChecklistItem" permissions: ["tender.checklist.update"]
+        - method: "POST"   path: "/:id/complete"          summary: "Completar item"
+          operation_id: "completeChecklistItem" permissions: ["tender.checklist.update"]
+
+    - controller: "TenderResultsController"
+      prefix: "/api/v1/tenders/:tenderId/result"
+      auth: "required"
+      endpoints:
+        - method: "POST"   path: "/"                      summary: "Registrar resultado"
+          operation_id: "registerResult" response_status: 201 permissions: ["tender.result"]
+        - method: "GET"    path: "/"                      summary: "Obter resultado"
+          operation_id: "getResult"      permissions: ["tender.read"]
+
+    - controller: "TenderTimelineController"
+      prefix: "/api/v1/tenders/:tenderId/timeline"
+      auth: "required"
+      endpoints:
+        - method: "GET"    path: "/"                      summary: "Timeline completa"
+          operation_id: "getTimeline"    permissions: ["tender.read"]
+
+    - controller: "TenderDeadlinesController"
+      prefix: "/api/v1/tenders/:tenderId/deadlines"
+      auth: "required"
+      endpoints:
+        - method: "GET"    path: "/"                      summary: "Listar prazos"
+          operation_id: "listDeadlines"  permissions: ["tender.read"]
+
+  integrations:
+    workflow_engine:
+      description: "Cada Tender pode ter uma instância de workflow associada"
+      on_status_change: "sincronizar status do Tender com estágio do Workflow Engine"
+      events_consumed:
+        - "com.bidflow.workflow.stage.changed.v1"       → atualizar Tender.status
+        - "com.bidflow.workflow.instance.completed.v1"  → finalizar Tender
+      events_published:
+        - "TenderCaptured"                              → iniciar workflow
+        - "TenderProposalSubmitted"                      → avançar estágio
+
+    crm:
+      description: "Licitações capturadas podem gerar oportunidades no CRM"
+      events_published:
+        - "TenderCaptured"  → CRM cria Opportunity
+        - "TenderWon"       → CRM atualiza pipeline
+        - "TenderLost"      → CRM registra perdido
+
+    notifications:
+      description: "Notificações automáticas para eventos críticos"
+      events:
+        - "Prazo de fechamento próximo (24h)"
+        - "Checklist pendente próximo do prazo"
+        - "Disputa prestes a iniciar"
+        - "Resultado publicado"
+        - "Nova versão de documento"
+        - "Tarefa do workflow atribuída"
+      channels: ["EMAIL", "PUSH", "IN_APP", "WHATSAPP"]
+      template_variables: ["tenderNumber", "organization", "deadlineDate", "assignedToName"]
+
+  permissions:
+    permission_catalog:
+      - code: "tender.create"
+      - code: "tender.read"
+      - code: "tender.update"
+      - code: "tender.transition"
+      - code: "tender.manage"
+      - code: "tender.analysis"
+      - code: "tender.document.upload"
+      - code: "tender.document.validate"
+      - code: "tender.proposal.create"
+      - code: "tender.proposal.submit"
+      - code: "tender.checklist.update"
+      - code: "tender.dispute.bid"
+      - code: "tender.result"

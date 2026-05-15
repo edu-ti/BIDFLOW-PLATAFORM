@@ -1,0 +1,115 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: Aggregate Root
+# =============================================================================
+# Template para especificar aggregates (raiz do DDD tático).
+# Schema version: 1.0
+# =============================================================================
+
+aggregate:
+  # ── Metadata ──
+  id: "[EntityName]"
+  name: "[Nome do Aggregate]"
+  description: "[Descrição detalhada da responsabilidade e invariantes]"
+  root: true
+
+  # ── Persistence ──
+  persistence:
+    table: "[snake_case_table]"
+    schema: "tenant"                          # public | tenant
+    indexes:
+      - fields: ["tenant_id", "field_a"]       unique: false
+      - fields: ["tenant_id", "field_b"]       unique: true
+    soft_delete: false
+
+  # ── Attributes ──
+  attributes:
+    - name: "id"
+      type: "uuid"
+      required: true
+      description: "Identificador único"
+      immutable: true
+
+    - name: "tenantId"
+      type: "uuid"
+      required: true
+      description: "Identificador do tenant"
+      immutable: true
+
+    - name: "status"
+      type: "enum"
+      required: true
+      default: "PENDING"
+      values: ["PENDING", "ACTIVE", "COMPLETED", "CANCELLED"]
+
+    - name: "createdAt"
+      type: "datetime"
+      required: true
+      default: "now()"
+    - name: "updatedAt"
+      type: "datetime"
+      required: true
+      default: "now()"
+
+  # ── State Machine ──
+  state_machine:
+    initial: "PENDING"
+    states:
+      - id: "PENDING"
+        allowed_transitions: ["ACTIVE", "CANCELLED"]
+      - id: "ACTIVE"
+        allowed_transitions: ["COMPLETED", "CANCELLED"]
+      - id: "COMPLETED"
+        final: true
+      - id: "CANCELLED"
+        final: true
+
+  # ── Invariants ──
+  invariants:
+    - "status COMPLETED exige campo filled"
+    - "data não pode ser alterada após COMPLETED"
+    - "tenantId é imutável"
+
+  # ── Domain Events ──
+  events_produced:
+    - name: "[Entity][Action]Event"
+      type: "com.bidflow.{context}.{entity}.{action}.v1"
+      when: "[ação de negócio executada]"
+
+  # ── Entity Methods ──
+  methods:
+    - name: "create"
+      params:
+        - "tenantId: uuid"
+        - "props: CreateProps"
+      events: ["[Entity]Created"]
+      rules:
+        - "título obrigatório"
+        - "status = PENDING"
+
+    - name: "[action]"
+      params:
+        - "param1: type"
+      events: ["[Entity][Action]"]
+      rules:
+        - "regra 1"
+        - "regra 2"
+
+  # ── Relationships ──
+  relationships:
+    - type: "has_many"
+      entity: "[ChildEntity]"
+      via: "parentId"
+      on_delete: "CASCADE | RESTRICT | SET_NULL"
+    - type: "belongs_to"
+      entity: "[ParentEntity]"
+      via: "parentId"
+      on_delete: "RESTRICT"
+
+  # ── Child Entities ──
+  children:
+    - id: "[ChildEntity]"
+      name: "[Nome]"
+      description: "[Descrição]"
+      attributes:
+        - name: "id"    type: "uuid"
+        - name: "field" type: "string"

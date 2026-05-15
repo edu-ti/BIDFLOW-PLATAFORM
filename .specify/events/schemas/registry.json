@@ -116,5 +116,25 @@
         "v1": { "status": "active", "path": "saas/quota-exceeded-v1.json", "since": "2026-05-15" }
       }
     }
+  },
+  "workflow": {
+    "WorkflowStarted": {
+      "v1": { "status": "active", "path": "workflow/workflow-started-v1.json", "since": "2026-05-15" }
+    },
+    "StageChanged": {
+      "v1": { "status": "active", "path": "workflow/stage-changed-v1.json", "since": "2026-05-15" }
+    },
+    "ApprovalRequested": {
+      "v1": { "status": "active", "path": "workflow/approval-requested-v1.json", "since": "2026-05-15" }
+    },
+    "ApprovalGranted": {
+      "v1": { "status": "active", "path": "workflow/approval-granted-v1.json", "since": "2026-05-15" }
+    },
+    "WorkflowCompleted": {
+      "v1": { "status": "active", "path": "workflow/workflow-completed-v1.json", "since": "2026-05-15" }
+    },
+    "TaskAssigned": {
+      "v1": { "status": "active", "path": "workflow/task-assigned-v1.json", "since": "2026-05-15" }
+    }
   }
 }

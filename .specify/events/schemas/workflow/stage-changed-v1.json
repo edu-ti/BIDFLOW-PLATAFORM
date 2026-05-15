@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "com.bidflow.workflow.stage.changed.v1",
+  "title": "StageChangedEvent",
+  "description": "Uma transição foi executada entre estágios do workflow",
+  "type": "object",
+  "properties": {
+    "specversion": { "type": "string", "const": "1.0" },
+    "id": { "type": "string", "format": "uuid", "description": "ID único do evento" },
+    "source": { "type": "string", "format": "uri" },
+    "type": { "type": "string", "const": "com.bidflow.workflow.stage.changed.v1" },
+    "subject": { "type": "string", "description": "ID da instância" },
+    "time": { "type": "string", "format": "date-time" },
+    "tenantid": { "type": "string", "format": "uuid" },
+    "userid": { "type": "string", "format": "uuid" },
+    "data": {
+      "type": "object",
+      "required": [
+        "instanceId", "workflowDefinitionId",
+        "fromStage", "toStage", "transitionSlug", "executedBy"
+      ],
+      "properties": {
+        "instanceId": { "type": "string", "format": "uuid" },
+        "workflowDefinitionId": { "type": "string", "format": "uuid" },
+        "fromStage": { "type": "string" },
+        "fromStageName": { "type": "string" },
+        "toStage": { "type": "string" },
+        "toStageName": { "type": "string" },
+        "transitionSlug": { "type": "string" },
+        "transitionName": { "type": "string" },
+        "isAutomatic": { "type": "boolean" },
+        "comment": { "type": ["string", "null"] },
+        "executedBy": { "type": "string", "format": "uuid" },
+        "deadlineAt": { "type": ["string", "null"], "format": "date-time" },
+        "isRejection": { "type": "boolean" }
+      }
+    }
+  },
+  "required": ["specversion", "id", "source", "type", "time", "tenantid", "data"]
+}

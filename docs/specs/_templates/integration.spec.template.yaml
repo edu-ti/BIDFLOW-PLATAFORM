@@ -1,0 +1,88 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: Integration Contract
+# =============================================================================
+# Template para especificar contratos de integração entre bounded contexts.
+# Schema version: 1.0
+# =============================================================================
+
+integration:
+  # ── Metadata ──
+  id: "int-{context-a}-{context-b}"
+  name: "[Integração entre Contexto A e Contexto B]"
+  version: "1.0.0"
+  status: "draft"
+
+  # ── Contexts ──
+  source_context: "[Contexto A]"
+  target_context: "[Contexto B]"
+  integration_type: "event-driven | api | shared-database | websocket"
+
+  # ── Event-Driven Integration ─────────────────────────────────────────────
+  events:
+    produced:
+      - event: "[EventName]"
+        type: "com.bidflow.{context}.{entity}.{action}.v1"
+        description: "[Descrição do evento]"
+        when: "[Condição de disparo]"
+
+        payload_mapping:
+          source_field:  "target_field"
+          source_field2: "target_field2"
+
+        consumer:
+          service: "[TargetService]"
+          handler: "[handlerName]"
+          queue: "bidflow.{context}.{event}.{service}"
+          async: true
+
+    consumed:
+      - event: "[EventName]"
+        type: "com.bidflow.{context}.{entity}.{action}.v1"
+        handler: "[handlerName]"
+        action: "[Descrição da ação no consumo]"
+
+  # ── API Integration ──────────────────────────────────────────────────────
+  api:
+    type: "REST"
+    base_url: "http://{service}:{port}/api/v1/{context}"
+    auth:
+      type: "service-account | api-key | jwt"
+      credentials: "[secret-reference]"
+
+    endpoints:
+      - path: "/{entities}"
+        method: "GET"
+        timeout: "30s"
+        fallback: "cache | error | default"
+
+  # ── Shared Database Integration ──────────────────────────────────────────
+  shared_database:
+    tables:
+      - schema: "public"
+        table: "[table_name]"
+        access: "read-only | read-write"
+        indexes: []
+
+  # ── Synchronization ──
+  sync:
+    strategy: "eventual-consistency | strong-consistency | saga"
+    delay: "< 1s"
+    idempotency: true
+    error_handling: "retry-3x-then-dlq | fail-fast | ignore"
+
+  # ── SLA ──
+  sla:
+    latency_p99: "500ms"
+    availability: "99.9%"
+    throughput: "100 events/s"
+
+  # ── Contracts ──
+  contracts:
+    api: ".specify/contracts/api/{context-a}-{context-b}-openapi.yml"
+    events: ".specify/events/schemas/{context}/"
+
+  # ── Testing ──
+  testing:
+    contract_tests: true
+    integration_tests: true
+    chaos_ready: false

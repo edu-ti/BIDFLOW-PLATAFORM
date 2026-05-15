@@ -1,0 +1,161 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: API Contract
+# =============================================================================
+# Template para especificar contratos de API REST.
+# Schema version: 1.0
+# =============================================================================
+
+api:
+  # ── Metadata ──
+  version: "v1"
+  base_path: "/api/v1/{context}"
+  format: "REST"
+  content_type: "application/json"
+
+  # ── Authentication ──
+  auth:
+    type: "JWT"
+    scheme: "Bearer"
+    header: "Authorization"
+    tenant_header: "X-Tenant-Id"
+
+  # ── Controllers ──────────────────────────────────────────────────────────
+  controllers:
+
+    - name: "[EntityName]Controller"
+      description: "CRUD + operações do aggregate [EntityName]"
+      prefix: "/{entities}"
+
+      endpoints:
+
+        # ── Create ──
+        - method: "POST"
+          path: "/"
+          summary: "Criar [entidade]"
+          operation_id: "create[Entity]"
+
+          request:
+            dto: "Create[Entity]Dto"
+            content_type: "application/json"
+            example:
+              field1: "value"
+              field2: 100
+
+          response:
+            status: 201
+            dto: "[Entity]ResponseDto"
+            description: "Entidade criada"
+
+          permissions: ["{context}.create"]
+          idempotent: true
+          audit: true
+
+        # ── List ──
+        - method: "GET"
+          path: "/"
+          summary: "Listar [entidades]"
+          operation_id: "list[Entity]"
+
+          request:
+            dto: "[Entity]FilterDto"
+            in: "query"
+
+          response:
+            status: 200
+            dto: "PaginatedResponse<[Entity]ResponseDto>"
+            pagination: true
+
+          permissions: ["{context}.read"]
+          cache:
+            ttl: 60
+            key: "{tenantId}:{context}:{entities}:{page}:{limit}"
+
+          filters:
+            - param: "status"       type: "enum"
+            - param: "search"       type: "string"
+            - param: "date_from"    type: "date"
+            - param: "date_to"      type: "date"
+
+        # ── Get ──
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter [entidade]"
+          operation_id: "get[Entity]"
+
+          response:
+            status: 200
+            dto: "[Entity]DetailResponseDto"
+
+          permissions: ["{context}.read"]
+
+        # ── Update ──
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar [entidade]"
+          operation_id: "update[Entity]"
+
+          request:
+            dto: "Update[Entity]Dto"
+
+          response:
+            status: 200
+            dto: "[Entity]ResponseDto"
+
+          permissions: ["{context}.update"]
+          idempotent: true
+          audit: true
+
+        # ── Delete ──
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover [entidade]"
+          operation_id: "delete[Entity]"
+          response:
+            status: 204
+          permissions: ["{context}.delete"]
+          audit: true
+
+        # ── Action ──
+        - method: "POST"
+          path: "/:id/{action}"
+          summary: "[Ação de negócio]"
+          operation_id: "{action}[Entity]"
+
+          request:
+            dto: "[Action][Entity]Dto"
+
+          response:
+            status: 200
+            dto: "[Entity]ResponseDto"
+
+          permissions: ["{context}.{action}"]
+          audit: true
+
+      # ── Webhooks ──
+      webhooks:
+        - name: "{entity}.{action}"
+          url: "{tenant.webhookUrl}/{context}/{entity}/{action}"
+          events: ["{entity}.{action}"]
+          secret: true
+
+  # ── Rate Limiting ──
+  rate_limiting:
+    default:
+      max: 100
+      window: "60s"
+    auth_endpoints:
+      max: 10
+      window: "60s"
+    dispute_bid:
+      max: 30
+      window: "60s"
+
+  # ── Error Responses ──
+  errors:
+    - status: 400  code: "VALIDATION_ERROR"       message: "Dados inválidos"
+    - status: 401  code: "UNAUTHORIZED"            message: "Token ausente ou inválido"
+    - status: 403  code: "FORBIDDEN"               message: "Sem permissão"
+    - status: 404  code: "NOT_FOUND"               message: "Entidade não encontrada"
+    - status: 409  code: "DUPLICATE"               message: "Registro duplicado"
+    - status: 422  code: "UNPROCESSABLE"           message: "Regra de negócio violada"
+    - status: 429  code: "RATE_LIMITED"            message: "Muitas requisições"

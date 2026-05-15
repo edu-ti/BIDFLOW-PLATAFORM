@@ -1,0 +1,101 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: Events
+# =============================================================================
+# Template para especificar eventos de domínio e integração.
+# Schema version: 1.0
+# =============================================================================
+
+events:
+  # ── Domain Event ─────────────────────────────────────────────────────────
+  - id: "evt-{context}-{entity}-{action}"
+    name: "[EntityName][ActionPast]Event"           # Ex: "TenderCaptured"
+    description: "[Descrição do evento]"
+    type: "domain"                                  # domain | integration
+    version: "v1"
+    status: "active"                                # active | deprecated | sunset
+
+    # CloudEvents type
+    cloud_event_type: "com.bidflow.{context}.{entity}.{action}.v1"
+
+    # Routing
+    routing_key: "{tenantId}.{context}.{entity}.{action}"
+    partition_by: "tenantId"
+
+    # Payload Schema
+    payload:
+      eventId:
+        type: "uuid"
+        required: true
+        description: "ID único do evento (idempotência)"
+      aggregateId:
+        type: "uuid"
+        required: true
+        description: "ID do aggregate que gerou o evento"
+      tenantId:
+        type: "uuid"
+        required: true
+        description: "ID do tenant"
+      timestamp:
+        type: "datetime"
+        required: true
+      data:
+        type: "object"
+        required: true
+        properties:
+          entityId:   { type: "uuid",   description: "ID da entidade" }
+          field1:     { type: "string", description: "Campo 1" }
+          field2:     { type: "number", required: false }
+      metadata:
+        userId:         { type: "uuid",   required: false }
+        correlationId:  { type: "uuid",   required: false }
+        causationId:    { type: "uuid",   required: false }
+
+    # Versioning
+    changelog:
+      - version: "v1"
+        date: "YYYY-MM-DD"
+        description: "Versão inicial"
+
+    # Schema (JSON Schema reference)
+    schema: ".specify/events/schemas/{context}/{entity}-{action}-v1.json"
+
+    # Consumers
+    consumers:
+      - service: "[ConsumerService]"
+        handler: "[handlerName]"
+        async: true
+        queue: "bidflow.{context}.{entity}.{action}.{service}"
+
+  # ── Integration Event ────────────────────────────────────────────────────
+  - id: "evt-int-{context}-{entity}-{action}"
+    name: "[EntityName][ActionPast]IntegrationEvent"
+    description: "[Versão para publicação externa]"
+    type: "integration"
+    version: "v1"
+
+    cloud_event_type: "com.bidflow.{context}.{entity}.{action}.v1"
+
+    # Serialization
+    format: "cloud-events-v1"
+    content_type: "application/cloudevents+json"
+    serializer: "json"                            # json | avro | protobuf
+
+    # Delivery guarantees
+    delivery:
+      mode: "at-least-once"
+      ordering: "per-partition-key"
+      idempotency_key: "eventId"
+
+    # Retry policy
+    retry:
+      max_attempts: 3
+      backoff: "exponential"                      # exponential | fixed | immediate
+      initial_interval: "1s"
+      multiplier: 2
+
+    # Dead letter queue
+    dlq:
+      exchange: "bidflow.dlq.{context}"
+      queue: "dlq.{context}.{entity}.{action}"
+      ttl_days: 30
+      alert_severity: "P3"

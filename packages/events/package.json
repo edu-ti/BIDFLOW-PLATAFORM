@@ -1,0 +1,31 @@
+{
+  "name": "@bidflow/events",
+  "version": "1.0.0",
+  "description": "Shared event contracts, payloads, serializers and utilities for BidFlow Platform event-driven architecture",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts": "./src/contracts/index.ts",
+    "./payloads": "./src/payloads/index.ts",
+    "./schemas": "./src/schemas/index.ts",
+    "./serializers": "./src/serializers/index.ts",
+    "./publishers": "./src/publishers/index.ts",
+    "./consumers": "./src/consumers/index.ts",
+    "./versioning": "./src/versioning/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  }
+}

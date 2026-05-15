@@ -1,0 +1,2634 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec: Módulo de Gestão de Tenants (SaaS Multi-tenant)
+# =============================================================================
+# Este documento especifica o módulo de Tenants do BidFlow Platform.
+# Abrange onboarding SaaS, provisionamento automático de schemas PostgreSQL,
+# planos, assinaturas, billing future-ready, quotas e ciclo de vida do tenant.
+# Schema version: 1.0 | Spec-Driven Development
+# =============================================================================
+
+spec:
+  # ── Metadados ────────────────────────────────────────────────────────────
+  id: "bidflow-tenant-001"
+  title: "Módulo de Gestão de Tenants (SaaS Multi-tenant)"
+  version: "1.0.0"
+  status: draft
+  context: "saas"
+  author: "Architecture Board"
+  created: "2026-05-15"
+  updated: "2026-05-15"
+
+  tags:
+    - "saas"
+    - "generic-subdomain"
+    - "cross-cutting"
+    - "multi-tenant"
+    - "provisioning"
+    - "billing"
+
+  # ── Dependências ─────────────────────────────────────────────────────────
+  depends_on:
+    specs:
+      - "bidflow-auth-001"
+    services:
+      - "postgres"
+      - "redis"
+    apis: []
+
+  # ── Visão Geral ──────────────────────────────────────────────────────────
+  overview: |
+    ## Descrição
+    Módulo central de gestão multi-tenant da plataforma BidFlow. Responsável
+    pelo ciclo de vida completo de cada inquilino (tenant): registro, onboarding,
+    provisionamento de schema PostgreSQL isolado, assinatura de planos, controle
+    de quotas, faturamento (billing future-ready) e desativação.
+
+    O módulo adota isolamento do tipo **schema-per-tenant**: cada tenant recebe
+    um schema PostgreSQL dedicado (`tenant_<uuid>`), garantindo isolamento total
+    de dados entre inquilinos. O schema público (public) contém apenas metadados
+    globais: catálogo de planos, registro de tenants e schemas.
+
+    O onboarding é um processo orquestrado por saga, com 8 etapas que vão desde
+    a validação do registro até a ativação do schema. O billing é preparado para
+    integração futura com provedores de pagamento (Stripe, Asaas, etc.).
+
+    ## Objetivos de Negócio
+    1. Provisionar novo tenant em < 30 segundos (automação total)
+    2. Isolamento completo de dados entre tenants via schema PostgreSQL dedicado
+    3. Suportar planos STARTER, BUSINESS e ENTERPRISE com quotas flexíveis
+    4. Preparar arquitetura de billing para múltiplos provedores de pagamento
+    5. Permitir self-service onboarding com verificação de domínio
+
+    ## Critérios de Sucesso
+    - Tempo de provisionamento < 30s (p95)
+    - Zero vazamento de dados entre tenants
+    - Onboarding com até 5 etapas no máximo (UX)
+    - 99.9% de disponibilidade do módulo de resolução de tenant
+    - Capacidade de gerenciar 10.000+ tenants ativos simultaneamente
+
+  # ── Módulos ──────────────────────────────────────────────────────────────
+
+  modules:
+
+    - id: "tenant-module"
+      name: "Gestão de Tenants"
+      description: "Gerencia ciclo de vida, provisionamento, planos, assinaturas, quotas e billing"
+
+      entities:
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Tenant
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Tenant"
+          name: "Inquilino (Tenant)"
+          description: |
+            Representa uma organização/cliente que utiliza a plataforma.
+            Cada tenant possui um schema PostgreSQL isolado e um conjunto
+            de configurações, plano ativo, domínio customizado e contatos.
+            O aggregate Tenant é a raiz do módulo e orquestra todo o ciclo
+            de vida do inquilino na plataforma.
+          aggregate_root: true
+          persistence:
+            table: "tenants"
+            schema: "public"             # Tabela global (fora dos schemas de tenant)
+            indexes:
+              - fields: ["slug"]
+                unique: true
+              - fields: ["status"]
+              - fields: ["created_at"]
+              - fields: ["primary_domain"]
+                unique: true
+              - fields: ["schema_name"]
+                unique: true
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+              description: "Identificador único do tenant"
+              example: "770e8400-e29b-41d4-a716-446655440000"
+
+            - name: "schemaName"
+              type: "string"
+              required: true
+              description: "Nome do schema PostgreSQL isolado"
+              example: "tenant_770e8400"
+              pattern: "^tenant_[a-f0-9]{8}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{12}$"
+              immutable: true
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 63
+              description: "Identificador amigável único (usado em subdomínios)"
+              example: "empresa-exemplo"
+              pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+
+            - name: "legalName"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Razão social"
+              example: "Empresa Exemplo Ltda"
+
+            - name: "taxId"
+              type: "string"
+              required: true
+              max_length: 20
+              description: "CNPJ/CPF do tenant"
+              example: "12.345.678/0001-90"
+              sensitive: true
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "REGISTERING"
+              values:
+                - "REGISTERING"
+                - "PROVISIONING"
+                - "ACTIVE"
+                - "SUSPENDED"
+                - "CANCELLED"
+                - "DELETED"
+              description: "Status do ciclo de vida do tenant"
+
+            - name: "statusHistory"
+              type: "json"
+              required: false
+              description: "Histórico de mudanças de status"
+              example: '[{"from": "REGISTERING", "to": "PROVISIONING", "at": "2026-05-15T10:00:00Z"}, {"from": "PROVISIONING", "to": "ACTIVE", "at": "2026-05-15T10:00:25Z"}]'
+
+            - name: "primaryDomain"
+              type: "string"
+              required: false
+              description: "Domínio primário customizado"
+              example: "licita.empresaexemplo.com.br"
+
+            - name: "subdomain"
+              type: "string"
+              required: true
+              description: "Subdomínio na plataforma"
+              example: "empresa-exemplo"
+              immutable: true
+
+            - name: "locale"
+              type: "string"
+              required: true
+              default: "pt-BR"
+              description: "Locale padrão (idioma + região)"
+
+            - name: "timezone"
+              type: "string"
+              required: true
+              default: "America/Sao_Paulo"
+              description: "Fuso horário padrão"
+
+            - name: "currency"
+              type: "string"
+              required: true
+              default: "BRL"
+              description: "Moeda padrão"
+
+            - name: "dateFormat"
+              type: "string"
+              required: true
+              default: "DD/MM/YYYY"
+
+            - name: "config"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Configurações extensíveis do tenant"
+              example: '{"logoUrl": "https://cdn.bidflow.com/tenant-770e/logos/logo.png", "primaryColor": "#1a73e8", "customCss": "", "allowedIpRanges": ["192.168.0.0/16"], "sessionTimeout": 3600, "passwordPolicy": {"minLength": 8, "requireSpecialChars": true}}'
+
+            - name: "features"
+              type: "json"
+              required: true
+              default: "{}"
+              description: "Feature flags habilitadas para o tenant"
+              example: '{"advancedReporting": true, "autoBidding": false, "apiAccess": true, "whiteLabel": false}'
+
+            - name: "contacts"
+              type: "json"
+              required: false
+              description: "Contatos administrativos e técnicos"
+              example: '[{"name": "João Silva", "email": "joao@empresa.com", "role": "ADMIN", "phone": "+5511999999999"}]'
+
+            - name: "address"
+              type: "json"
+              required: false
+              description: "Endereço do tenant"
+              example: '{"street": "Av. Paulista, 1000", "city": "São Paulo", "state": "SP", "zipCode": "01310-100", "country": "BR"}'
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Metadados extensíveis para integrações"
+              example: '{"salesforceId": "001XX000001", "crmId": "crm-123", "internalNotes": ""}'
+
+            - name: "provisionedAt"
+              type: "datetime"
+              required: false
+              description: "Momento em que o schema foi provisionado"
+
+            - name: "activatedAt"
+              type: "datetime"
+              required: false
+              description: "Momento da ativação do tenant"
+
+            - name: "suspendedAt"
+              type: "datetime"
+              required: false
+              description: "Momento da suspensão"
+
+            - name: "suspensionReason"
+              type: "string"
+              required: false
+              max_length: 500
+              description: "Motivo da suspensão"
+              example: "PAYMENT_DEFAULT | TERMS_VIOLATION | MANUAL"
+
+            - name: "cancelledAt"
+              type: "datetime"
+              required: false
+              description: "Momento do cancelamento"
+
+            - name: "cancellationReason"
+              type: "string"
+              required: false
+              description: "Motivo do cancelamento"
+              example: "VOLUNTARY | PAYMENT_DEFAULT | MIGRATION"
+
+            - name: "deletedAt"
+              type: "datetime"
+              required: false
+              description: "Data da exclusão lógica (anonymization)"
+
+            - name: "onboardingCompletedAt"
+              type: "datetime"
+              required: false
+              description: "Onboarding concluído pelo usuário admin"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "slug deve ser único globalmente (case-insensitive)"
+            - "status só pode transitar no fluxo definido: REGISTERING → PROVISIONING → ACTIVE ↔ SUSPENDED → CANCELLED → DELETED"
+            - "subdomain é imutável após criação"
+            - "schemaName é imutável e gerado automaticamente"
+            - "apenas tenants ACTIVE podem utilizar a plataforma"
+            - "slug deve ter entre 3 e 63 caracteres, apenas letras minúsculas, números e hífens"
+            - "primaryDomain quando definido deve ser único globalmente"
+            - "taxId é armazenado criptografado"
+
+          state_machine:
+            initial: "REGISTERING"
+            states:
+              - id: "REGISTERING"
+                label: "Registrando"
+                description: "Registro iniciado, aguardando validação"
+                allowed_transitions: ["PROVISIONING", "CANCELLED"]
+
+              - id: "PROVISIONING"
+                label: "Provisionando"
+                description: "Schema PostgreSQL sendo criado e migrado"
+                allowed_transitions: ["ACTIVE", "CANCELLED"]
+
+              - id: "ACTIVE"
+                label: "Ativo"
+                description: "Tenant operacional e faturando"
+                allowed_transitions: ["SUSPENDED", "CANCELLED", "DELETED"]
+
+              - id: "SUSPENDED"
+                label: "Suspenso"
+                description: "Acesso bloqueado temporariamente"
+                allowed_transitions: ["ACTIVE", "CANCELLED", "DELETED"]
+
+              - id: "CANCELLED"
+                label: "Cancelado"
+                description: "Assinatura cancelada, dados mantidos por compliance"
+                allowed_transitions: ["ACTIVE", "DELETED"]
+
+              - id: "DELETED"
+                label: "Excluído"
+                description: "Dados anonimizados ou removidos (após retenção legal)"
+                final: true
+
+          relationships:
+            - type: "has_one"
+              entity: "Subscription"
+              via: "tenantId"
+              description: "Assinatura ativa do tenant"
+
+            - type: "belongs_to"
+              entity: "Plan"
+              via: "planId"
+              description: "Plano contratado (via subscription)"
+
+            - type: "has_many"
+              entity: "TenantDomain"
+              via: "tenantId"
+              description: "Domínios associados ao tenant"
+
+            - type: "has_many"
+              entity: "TenantAuditLog"
+              via: "tenantId"
+              description: "Audit trail do tenant"
+
+            - type: "has_many"
+              entity: "QuotaUsage"
+              via: "tenantId"
+              description: "Uso de quotas do tenant"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Plan
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Plan"
+          name: "Plano"
+          description: |
+            Define um plano de assinatura com preço, quotas, features e ciclo
+            de faturamento. Planos são globais (não pertencem a um tenant).
+            Podem ser públicos (autoatendimento) ou privados (contrato enterprise).
+          aggregate_root: true
+          persistence:
+            table: "plans"
+            schema: "public"
+            indexes:
+              - fields: ["slug"]
+                unique: true
+              - fields: ["is_public", "status"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Nome do plano"
+              example: "Business"
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 50
+              description: "Identificador único do plano"
+              example: "business"
+              immutable: true
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 2000
+              description: "Descrição do plano para página de preços"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "ACTIVE"
+              values:
+                - "ACTIVE"
+                - "DEPRECATED"
+                - "HIDDEN"
+
+            - name: "isPublic"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Se true, aparece na página de preços para autoatendimento"
+
+            - name: "tier"
+              type: "integer"
+              required: true
+              description: "Nível hierárquico (1=basic, 2=business, 3=enterprise)"
+              example: 2
+
+            - name: "prices"
+              type: "json"
+              required: true
+              description: "Preços por moeda e ciclo de faturamento"
+              example: '[{"amount": 299.00, "currency": "BRL", "billingCycle": "MONTHLY"}, {"amount": 2990.00, "currency": "BRL", "billingCycle": "YEARLY"}]'
+
+            - name: "quotas"
+              type: "json"
+              required: true
+              description: "Limites de recursos do plano"
+              example: '{"users": 50, "rfps": 100, "api_calls_per_month": 50000, "storage_gb": 10, "concurrent_auctions": 5, "suppliers": 200}'
+
+            - name: "features"
+              type: "json"
+              required: true
+              description: "Features habilitadas no plano"
+              example: '{"advancedReporting": true, "autoBidding": false, "apiAccess": true, "whiteLabel": false, "mfaRequired": true, "customDomain": true, "samlSso": false, "auditExport": true}'
+
+            - name: "limits"
+              type: "json"
+              required: false
+              description: "Limites operacionais do plano"
+              example: '{"maxFileSizeMb": 50, "retentionDays": 365, "rateLimitPerMinute": 1000, "maxBidAmount": 10000000}'
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Metadados para billing externo"
+              example: '{"stripePriceIdMonthly": "price_xxx", "stripePriceIdYearly": "price_yyy"}'
+
+            - name: "sortOrder"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Ordem de exibição na página de preços"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "slug é imutável após criação"
+            - "tier deve ser único (cada nível tem apenas um plano público ativo)"
+            - "quotas.users >= 1 para qualquer plano ativo"
+            - "planos DEPRECATED não podem ser contratados por novos tenants"
+            - "preços devem ter pelo menos uma entrada (MONTHLY ou YEARLY)"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Subscription
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Subscription"
+          name: "Assinatura"
+          description: |
+            Representa o vínculo entre um tenant e um plano, com status,
+            período vigente, ciclo de faturamento e quotas contratadas.
+            Cada tenant tem exatamente uma assinatura ativa por vez.
+          aggregate_root: true
+          persistence:
+            table: "subscriptions"
+            schema: "public"
+            indexes:
+              - fields: ["tenant_id"]
+                unique: true
+              - fields: ["tenant_id", "status"]
+              - fields: ["plan_id", "status"]
+              - fields: ["current_period_end"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              description: "Tenant assinante"
+              unique: true
+
+            - name: "planId"
+              type: "uuid"
+              required: true
+              description: "Plano contratado"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "TRIAL"
+                - "ACTIVE"
+                - "PAST_DUE"
+                - "CANCELED"
+                - "EXPIRED"
+              description: "Status da assinatura"
+
+            - name: "billingCycle"
+              type: "enum"
+              required: true
+              default: "MONTHLY"
+              values:
+                - "MONTHLY"
+                - "YEARLY"
+                - "QUARTERLY"
+                - "BIENNIAL"
+
+            - name: "trialDays"
+              type: "integer"
+              required: false
+              default: 14
+              description: "Dias de trial"
+
+            - name: "trialEndsAt"
+              type: "datetime"
+              required: false
+              description: "Fim do período de trial"
+
+            - name: "currentPeriodStart"
+              type: "date"
+              required: true
+              default: "today()"
+              description: "Início do período de faturamento atual"
+
+            - name: "currentPeriodEnd"
+              type: "date"
+              required: true
+              description: "Fim do período de faturamento atual"
+
+            - name: "canceledAt"
+              type: "datetime"
+              required: false
+
+            - name: "canceledBy"
+              type: "uuid"
+              required: false
+
+            - name: "cancellationFeedback"
+              type: "json"
+              required: false
+              description: "Feedback do cancelamento"
+              example: '{"reason": "TOO_EXPENSIVE", "comment": "Contratamos concorrente", "alternativePlan": null}'
+
+            - name: "activatedAt"
+              type: "datetime"
+              required: false
+
+            - name: "pastDueSince"
+              type: "date"
+              required: false
+              description: "Desde quando está com pagamento pendente"
+
+            - name: "pastDueRetryCount"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Tentativas de cobrança desde o vencimento"
+
+            - name: "overdueDays"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Dias em atraso"
+
+            - name: "autoRenew"
+              type: "boolean"
+              required: true
+              default: true
+              description: "Renovação automática ao final do período"
+
+            - name: "nextPlanId"
+              type: "uuid"
+              required: false
+              description: "Plano para upgrade/downgrade agendado"
+
+            - name: "nextPlanEffectiveAt"
+              type: "date"
+              required: false
+              description: "Data efetiva da mudança de plano"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "cada tenant tem no máximo 1 subscription ACTIVE ou TRIAL por vez"
+            - "status ACTIVE requer currentPeriodStart <= today() <= currentPeriodEnd"
+            - "status PAST_DUE ocorre quando pagamento não é processado até currentPeriodEnd + graceDays"
+            - "status CANCELED não pode mais transicionar para ACTIVE"
+            - "trialEndsAt só existe se status == TRIAL"
+            - "nextPlanId só pode existir se nextPlanEffectiveAt for futuro"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "Tenant"
+              via: "tenantId"
+
+            - type: "belongs_to"
+              entity: "Plan"
+              via: "planId"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: QuotaUsage
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "QuotaUsage"
+          name: "Uso de Quotas"
+          description: |
+            Registra o consumo atual de cada recurso por tenant.
+            Usado pelo QuotaEnforcementService para verificar se operações
+            podem prosseguir dentro dos limites do plano contratado.
+          aggregate_root: false
+          persistence:
+            table: "quota_usage"
+            schema: "public"
+            indexes:
+              - fields: ["tenant_id", "resource"]
+                unique: true
+              - fields: ["tenant_id"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "resource"
+              type: "enum"
+              required: true
+              description: "Recurso monitorado"
+              values:
+                - "USERS"
+                - "RFPS"
+                - "AUCTIONS"
+                - "API_CALLS"
+                - "STORAGE_MB"
+                - "SUPPLIERS"
+                - "CONTRACTS"
+
+            - name: "used"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Quantidade utilizada no período atual"
+
+            - name: "limit"
+              type: "integer"
+              required: true
+              description: "Limite máximo permitido (do plano)"
+
+            - name: "resetAt"
+              type: "datetime"
+              required: true
+              description: "Momento em que o contador será zerado"
+
+            - name: "overageAllowed"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Se pode exceder o limite (com cobrança extra)"
+
+            - name: "overageCount"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Quantas vezes excedeu o limite no período"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "used nunca pode exceder limit a menos que overageAllowed == true"
+            - "resetAt deve ser atualizado a cada ciclo de faturamento"
+            - "cada (tenantId, resource) é único"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: TenantDomain
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "TenantDomain"
+          name: "Domínio do Tenant"
+          description: |
+            Domínios personalizados associados ao tenant para acesso
+            white-label. Cada domínio deve ser verificado via DNS (TXT record)
+            antes de ser ativado. Suporta múltiplos domínios por tenant.
+          aggregate_root: false
+          persistence:
+            table: "tenant_domains"
+            schema: "public"
+            indexes:
+              - fields: ["domain"]
+                unique: true
+              - fields: ["tenant_id", "status"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "domain"
+              type: "string"
+              required: true
+              description: "Nome do domínio (FQDN)"
+              example: "licita.empresaexemplo.com.br"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "VERIFYING"
+                - "ACTIVE"
+                - "FAILED"
+                - "REMOVED"
+
+            - name: "verificationToken"
+              type: "string"
+              required: true
+              description: "Token TXT para verificação DNS"
+
+            - name: "verifiedAt"
+              type: "datetime"
+              required: false
+
+            - name: "isPrimary"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Domínio principal do tenant"
+
+            - name: "sslStatus"
+              type: "enum"
+              required: false
+              values: ["PENDING", "ISSUED", "FAILED", "EXPIRED"]
+              description: "Status do certificado SSL (auto-provisionado)"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "domain deve ser único globalmente"
+            - "apenas 1 domínio pode ser isPrimary por tenant"
+            - "status ACTIVE requer verificação DNS bem-sucedida"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: Invoice (billing future-ready)
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Invoice"
+          name: "Fatura"
+          description: |
+            Registro de fatura gerada para o tenant. Preparado para
+            integração futura com provedores de pagamento (Stripe, Asaas,
+            PagSeguro). Cada fatura representa um ciclo de cobrança.
+          aggregate_root: true
+          persistence:
+            table: "invoices"
+            schema: "public"
+            indexes:
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "due_date"]
+              - fields: ["subscription_id"]
+              - fields: ["external_id"]
+                unique: true
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "subscriptionId"
+              type: "uuid"
+              required: true
+
+            - name: "number"
+              type: "string"
+              required: true
+              description: "Número sequencial da fatura"
+              example: "INV-2026-000001"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "PAID"
+                - "OVERDUE"
+                - "CANCELED"
+                - "REFUNDED"
+                - "CHARGEBACK"
+
+            - name: "amount"
+              type: "decimal"
+              required: true
+              precision: 12
+              scale: 2
+              description: "Valor total da fatura"
+
+            - name: "currency"
+              type: "string"
+              required: true
+              default: "BRL"
+
+            - name: "billingCycle"
+              type: "enum"
+              required: true
+              values: ["MONTHLY", "YEARLY", "QUARTERLY"]
+
+            - name: "periodStart"
+              type: "date"
+              required: true
+
+            - name: "periodEnd"
+              type: "date"
+              required: true
+
+            - name: "issueDate"
+              type: "date"
+              required: true
+              default: "today()"
+
+            - name: "dueDate"
+              type: "date"
+              required: true
+
+            - name: "paidAt"
+              type: "datetime"
+              required: false
+
+            - name: "paymentMethod"
+              type: "enum"
+              required: false
+              values: ["CREDIT_CARD", "BOLETO", "PIX", "DEBIT", "TRANSFER"]
+
+            - name: "paymentProvider"
+              type: "enum"
+              required: false
+              values: ["STRIPE", "ASAAS", "PAGSEGURO", "MERCADO_PAGO"]
+
+            - name: "externalId"
+              type: "string"
+              required: false
+              description: "ID da fatura no provedor de pagamento"
+              example: "in_1ABC123Def456"
+
+            - name: "externalUrl"
+              type: "string"
+              required: false
+              description: "Link para pagamento no provedor"
+
+            - name: "items"
+              type: "json"
+              required: true
+              description: "Itens da fatura"
+              example: '[{"description": "Plano Business - Mensal", "amount": 299.00, "quantity": 1}, {"description": "Overage API Calls", "amount": 50.00, "quantity": 1}]'
+
+            - name: "discounts"
+              type: "json"
+              required: false
+              description: "Descontos aplicados"
+              example: '[{"description": "Fidelidade 10%", "amount": 29.90}]'
+
+            - name: "taxes"
+              type: "json"
+              required: false
+              description: "Impostos"
+              example: '[{"name": "ISS", "rate": 5.0, "amount": 14.95}]'
+
+            - name: "overdueDays"
+              type: "integer"
+              required: true
+              default: 0
+
+            - name: "canceledAt"
+              type: "datetime"
+              required: false
+
+            - name: "canceledReason"
+              type: "string"
+              required: false
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "amount = sum(items.amount * items.quantity) - sum(discounts.amount) + sum(taxes.amount)"
+            - "status PAID requer paidAt e paymentMethod preenchidos"
+            - "dueDate deve ser >= issueDate"
+            - "periodStart deve ser anterior a periodEnd"
+            - "faturas canceladas não podem ser pagas"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: TenantAuditLog
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "TenantAuditLog"
+          name: "Audit Log do Tenant"
+          description: |
+            Registro imutável de eventos relacionados ao ciclo de vida
+            do tenant. Inclui provisioning, mudanças de plano, suspensão,
+            ativação, configurações e faturamento. Retenção: 5 anos.
+          aggregate_root: false
+          persistence:
+            table: "tenant_audit_logs"
+            schema: "public"
+            indexes:
+              - fields: ["tenant_id", "occurred_at"]
+              - fields: ["tenant_id", "event_type"]
+              - fields: ["occurred_at"]
+              - fields: ["event_type"]
+            soft_delete: false
+            partitioning:
+              strategy: "by_month"
+              column: "occurred_at"
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "occurredAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "eventType"
+              type: "enum"
+              required: true
+              values:
+                - "TENANT_REGISTERED"
+                - "TENANT_PROVISIONING_STARTED"
+                - "TENANT_PROVISIONING_COMPLETED"
+                - "TENANT_ACTIVATED"
+                - "TENANT_SUSPENDED"
+                - "TENANT_REACTIVATED"
+                - "TENANT_CANCELLED"
+                - "TENANT_DELETED"
+                - "PLAN_CHANGED"
+                - "SUBSCRIPTION_CREATED"
+                - "SUBSCRIPTION_RENEWED"
+                - "SUBSCRIPTION_CANCELED"
+                - "SUBSCRIPTION_EXPIRED"
+                - "INVOICE_CREATED"
+                - "INVOICE_PAID"
+                - "INVOICE_OVERDUE"
+                - "INVOICE_CANCELED"
+                - "QUOTA_EXCEEDED"
+                - "DOMAIN_VERIFIED"
+                - "DOMAIN_FAILED"
+                - "CONFIG_UPDATED"
+                - "BILLING_METHOD_CHANGED"
+
+            - name: "performedBy"
+              type: "uuid"
+              required: false
+              description: "ID do admin que executou (null para automático)"
+
+            - name: "details"
+              type: "json"
+              required: false
+              description: "Detalhes do evento"
+              example: '{"fromPlan": "starter", "toPlan": "business", "reason": "upgrade"}'
+
+            - name: "ipAddress"
+              type: "string"
+              required: false
+
+            - name: "severity"
+              type: "enum"
+              required: true
+              default: "INFO"
+              values: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+            - name: "correlationId"
+              type: "uuid"
+              required: false
+
+          invariants:
+            - "eventos de billing têm severidade mínima INFO"
+            - "TENANT_SUSPENDED tem severidade WARNING"
+            - "QUOTA_EXCEEDED sempre tem details com resource, used e limit"
+
+      # ── Value Objects ──────────────────────────────────────────────────
+
+      value_objects:
+
+        - id: "TenantSlug"
+          description: "Identificador amigável único do tenant"
+          attributes:
+            - name: "value"
+              type: "string"
+              max_length: 63
+              validation: "regex: ^[a-z0-9]+(-[a-z0-9]+)*$"
+          invariants:
+            - "slug deve ter entre 3 e 63 caracteres"
+            - "apenas letras minúsculas, números e hífens"
+            - "não pode começar ou terminar com hífen"
+
+        - id: "SchemaName"
+          description: "Nome do schema PostgreSQL do tenant"
+          attributes:
+            - name: "value"
+              type: "string"
+              max_length: 63
+              pattern: "^tenant_[a-f0-9]{8}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{4}_[a-f0-9]{12}$"
+          invariants:
+            - "sempre prefixado com tenant_"
+            - "baseado no UUID do tenant (sem hífens)"
+
+        - id: "QuotaDefinition"
+          description: "Definição de limite de recurso"
+          attributes:
+            - name: "resource"
+              type: "enum"
+              values: ["USERS", "RFPS", "AUCTIONS", "API_CALLS", "STORAGE_MB", "SUPPLIERS", "CONTRACTS"]
+            - name: "limit"
+              type: "integer"
+              minimum: 1
+            - name: "overageAllowed"
+              type: "boolean"
+              default: false
+            - name: "overagePrice"
+              type: "decimal"
+              required: false
+              description: "Preço por unidade excedente"
+
+        - id: "BillingCycle"
+          description: "Ciclo de faturamento"
+          attributes:
+            - name: "type"
+              type: "enum"
+              values: ["MONTHLY", "YEARLY", "QUARTERLY", "BIENNIAL"]
+            - name: "intervalMonths"
+              type: "integer"
+              computed: true
+              description: "1, 3, 12 ou 24"
+
+        - id: "FeatureFlag"
+          description: "Chave de feature toggle"
+          attributes:
+            - name: "key"
+              type: "string"
+              max_length: 100
+            - name: "enabled"
+              type: "boolean"
+
+        - id: "TenantConfig"
+          description: "Configurações do tenant"
+          attributes:
+            - name: "logoUrl"
+              type: "string"
+              required: false
+            - name: "primaryColor"
+              type: "string"
+              default: "#1a73e8"
+            - name: "locale"
+              type: "string"
+              default: "pt-BR"
+            - name: "timezone"
+              type: "string"
+              default: "America/Sao_Paulo"
+            - name: "currency"
+              type: "string"
+              default: "BRL"
+            - name: "dateFormat"
+              type: "string"
+              default: "DD/MM/YYYY"
+            - name: "customDomain"
+              type: "string"
+              required: false
+
+        - id: "DomainVerificationToken"
+          description: "Token TXT para verificação DNS"
+          attributes:
+            - name: "value"
+              type: "string"
+              format: "uuid"
+            - name: "dnsRecord"
+              type: "string"
+              computed: true
+
+  # ── Regras de Negócio ─────────────────────────────────────────────────────
+
+  business_rules:
+
+    - id: "TNT-BR-001"
+      title: "Slug único global"
+      description: "Slug do tenant deve ser único em toda a plataforma (case-insensitive)"
+      scope: "Tenant.slug"
+      type: "hard"
+      error_code: "SLUG_ALREADY_TAKEN"
+      expression: "lower(slug) not in (select lower(slug) from tenants)"
+
+    - id: "TNT-BR-002"
+      title: "Mínimo de administradores ativos"
+      description: "Tenant ativo deve ter pelo menos 1 usuário com papel TENANT_ADMIN"
+      scope: "Tenant"
+      type: "hard"
+      error_code: "NO_ADMIN_USER"
+      expression: "exists user with role TENANT_ADMIN and status ACTIVE"
+
+    - id: "TNT-BR-003"
+      title: "Quota de usuários"
+      description: "Número de usuários ativos não pode exceder o limite do plano"
+      scope: "QuotaUsage.USERS"
+      type: "hard"
+      error_code: "QUOTA_USERS_EXCEEDED"
+      expression: "count(active users) < plan.quotas.users"
+
+    - id: "TNT-BR-004"
+      title: "Quota de RFPs"
+      description: "Número de RFPs ativas não pode exceder o limite do plano"
+      scope: "QuotaUsage.RFPS"
+      type: "hard"
+      error_code: "QUOTA_RFPS_EXCEEDED"
+      expression: "count(active rfps) < plan.quotas.rfps"
+
+    - id: "TNT-BR-005"
+      title: "Quota de API calls"
+      description: "Requisições de API no mês não podem exceder o limite do plano"
+      scope: "QuotaUsage.API_CALLS"
+      type: "hard"
+      error_code: "QUOTA_API_EXCEEDED"
+      expression: "api_calls_this_month < plan.quotas.api_calls_per_month"
+
+    - id: "TNT-BR-006"
+      title: "Trial expirado"
+      description: "Tenant em trial há mais de N dias deve fazer upgrade ou é suspenso"
+      scope: "Subscription"
+      type: "hard"
+      error_code: "TRIAL_EXPIRED"
+      expression: "status == TRIAL AND trialEndsAt < now()"
+
+    - id: "TNT-BR-007"
+      title: "Suspensão por inadimplência"
+      description: "Após N dias em PAST_DUE, a subscription é cancelada e o tenant suspenso"
+      scope: "Subscription"
+      type: "hard"
+      error_code: "SUBSCRIPTION_CANCELED_OVERDUE"
+      expression: "status == PAST_DUE AND overdueDays > 30"
+
+    - id: "TNT-BR-008"
+      title: "Upgrade/downgrade agendado"
+      description: "Mudança de plano só pode ser agendada para o próximo período de faturamento"
+      scope: "Subscription"
+      type: "hard"
+      error_code: "INVALID_PLAN_CHANGE_DATE"
+      expression: "nextPlanEffectiveAt >= currentPeriodEnd"
+
+    - id: "TNT-BR-009"
+      title: "Retenção legal de dados"
+      description: "Dados de tenant cancelado devem ser mantidos por 5 anos antes da exclusão"
+      scope: "Tenant"
+      type: "hard"
+      error_code: "RETENTION_PERIOD_NOT_MET"
+      expression: "status == CANCELLED AND now() - cancelledAt < 5 years"
+
+    - id: "TNT-BR-010"
+      title: "Schema naming"
+      description: "Schema PostgreSQL deve seguir padrão tenant_{uuid_sem_hífen}"
+      scope: "Tenant.schemaName"
+      type: "hard"
+      error_code: "INVALID_SCHEMA_NAME"
+      expression: "schemaName matches pattern ^tenant_[a-f0-9]{32}$"
+
+    - id: "TNT-BR-011"
+      title: "Mínimo de tenants ativos por nó"
+      description: "Cada nó de banco pode gerenciar até 5000 schemas ativos"
+      scope: "Infrastructure"
+      type: "soft"
+      error_code: "SCHEMA_LIMIT_WARNING"
+      expression: "active_schemas_in_node < 5000"
+
+    - id: "TNT-BR-012"
+      title: "Domínio customizado único"
+      description: "Domínio customizado deve ser único globalmente (não pode ser compartilhado entre tenants)"
+      scope: "TenantDomain.domain"
+      type: "hard"
+      error_code: "DOMAIN_ALREADY_IN_USE"
+      expression: "domain not in (select domain from tenant_domains where status != 'REMOVED')"
+
+  # ── Workflows ─────────────────────────────────────────────────────────────
+
+  workflows:
+
+    - id: "wf-tenant-onboarding"
+      name: "Saga de Onboarding de Tenant"
+      description: "Processo orquestrado de 8 etapas para provisionar um novo tenant"
+      trigger: "POST /api/v1/tenants (registro auto-serviço)"
+
+      stages:
+        - id: "VALIDATE_REGISTRATION"
+          label: "Validar registro"
+          description: "Verificar slug, email, taxId e dados do tenant"
+          rollback: "descartar registro"
+
+        - id: "CREATE_TENANT_RECORD"
+          label: "Criar registro"
+          description: "Inserir tenant na tabela global com status REGISTERING"
+          output: "tenantId"
+
+        - id: "CREATE_SCHEMA"
+          label: "Criar schema PostgreSQL"
+          description: "CREATE SCHEMA tenant_{uuid}; executar migrations"
+          rollback: "DROP SCHEMA tenant_{uuid} CASCADE"
+          timeout: "15s"
+          steps:
+            - "CREATE SCHEMA IF NOT EXISTS tenant_{uuid} AUTHORIZATION bidflow"
+            - "SET search_path TO tenant_{uuid}"
+            - "Executar migrations Prisma completas no schema"
+            - "Criar funções RLS e políticas de segurança"
+            - "Inserir dados seed (roles padrão, configurações iniciais)"
+
+        - id: "CREATE_SYSTEM_ROLES"
+          label: "Criar roles padrão"
+          description: "Inserir roles de sistema no schema do tenant"
+          steps:
+            - "Criar role TENANT_ADMIN com permissão total"
+            - "Criar role TENANT_MANAGER"
+            - "Criar role TENANT_VIEWER"
+            - "Criar role SUPPLIER"
+
+        - id: "CREATE_ADMIN_USER"
+          label: "Criar admin"
+          description: "Criar primeiro usuário admin e atribuir role TENANT_ADMIN"
+          rollback: "excluir usuário admin"
+
+        - id: "CREATE_SUBSCRIPTION"
+          label: "Criar assinatura"
+          description: "Criar subscription com plano + trial"
+          rollback: "excluir subscription"
+
+        - id: "INITIALIZE_QUOTAS"
+          label: "Inicializar quotas"
+          description: "Criar registros de QuotaUsage com limites do plano"
+
+        - id: "PROVISION_DOMAIN"
+          label: "Provisionar subdomínio"
+          description: "Configurar roteamento DNS do subdomínio do tenant"
+
+        - id: "ACTIVATE_TENANT"
+          label: "Ativar tenant"
+          description: "Transicionar status para ACTIVE, enviar emails de boas-vindas"
+          output: "tenant ativo e funcional"
+
+      compensation_steps:
+        - stage: "CREATE_SCHEMA"
+          action: "DROP SCHEMA tenant_{uuid} CASCADE"
+          only_if: "schema exists"
+        - stage: "CREATE_ADMIN_USER"
+          action: "DELETE user where email = adminEmail"
+        - stage: "CREATE_SUBSCRIPTION"
+          action: "DELETE subscription where tenantId = tenantId"
+        - stage: "ACTIVATE_TENANT"
+          action: "ALTER TENANT SET status = CANCELLED"
+          notify: "Equipe de operações — tenant onboarding falhou após ativação"
+
+      saga_timeout: "60s"
+
+    - id: "wf-tenant-suspension"
+      name: "Fluxo de Suspensão de Tenant"
+      description: "Suspende tenant por inadimplência ou violação de termos"
+      trigger: "Subscription.status → PAST_DUE AND overdueDays > 5"
+
+      stages:
+        - id: "NOTIFY_TENANT"
+          label: "Notificar tenant"
+          description: "Email e notificação in-app sobre pendência"
+
+        - id: "GRACE_PERIOD"
+          label: "Período de carência"
+          description: "Aguardar até 30 dias com tentativas de cobrança semanais"
+
+        - id: "SUSPEND_ACCESS"
+          label: "Suspender acesso"
+          description: "Bloquear acesso de todos os usuários do tenant"
+          steps:
+            - "Transicionar Tenant.status → SUSPENDED"
+            - "Revogar todas as sessões ativas (Redis + DB)"
+            - "Remover roteamento de DNS/dashboard"
+
+        - id: "NOTIFY_SUSPENSION"
+          label: "Notificar suspensão"
+          description: "Email para contatos admin informando suspensão"
+
+      recovery:
+        trigger: "Pagamento processado"
+        steps:
+          - "Transicionar Tenant.status → ACTIVE"
+          - "Restaurar sessões"
+          - "Restaurar roteamento"
+
+    - id: "wf-tenant-cancellation"
+      name: "Fluxo de Cancelamento de Tenant"
+      description: "Cancelamento voluntário ou forçado com retenção legal"
+      trigger: "POST /api/v1/tenants/:id/cancel"
+
+      stages:
+        - id: "VALIDATE_CANCEL"
+          label: "Validar cancelamento"
+          description: "Verificar permissões e estado do tenant"
+
+        - id: "COLLECT_FEEDBACK"
+          label: "Coletar feedback"
+          description: "Opicional — motivo e comentário do cancelamento"
+
+        - id: "CANCEL_SUBSCRIPTION"
+          label: "Cancelar assinatura"
+          description: "Transicionar Subscription.status → CANCELED"
+          steps:
+            - "Definir cancelamento para fim do período atual"
+            - "Cancelar cobranças futuras no gateway"
+
+        - id: "SUSPEND_IMMEDIATELY"
+          label: "Suspender imediatamente"
+          description: "Suspender acesso (cancelamento voluntário = imediato ou fim do período)"
+
+        - id: "SCHEDULE_RETENTION"
+          label: "Agendar retenção"
+          description: "Marcar para exclusão após 5 anos de retenção legal"
+          steps:
+            - "Agendar job para daqui 5 anos"
+            - "Anonimizar dados sensíveis (taxId, email, etc.)"
+
+        - id: "NOTIFY_CANCELLATION"
+          label: "Notificar"
+          description: "Email de confirmação com resumo do processo"
+
+  # ── Eventos ───────────────────────────────────────────────────────────────
+
+  events:
+
+    - id: "evt-tenant-registered"
+      name: "TenantRegistered"
+      description: "Novo tenant registrado na plataforma (início do onboarding)"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.registered.v1"
+      routing_key: "{tenantId}.saas.tenant.registered"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            tenantId: { type: "uuid" }
+            legalName: { type: "string" }
+            slug: { type: "string" }
+            taxId: { type: "string" }
+            planSlug: { type: "string" }
+            adminEmail: { type: "string" }
+            adminName: { type: "string" }
+            registeredAt: { type: "datetime" }
+
+      consumers:
+        - service: "onboarding"
+          handler: "startProvisioning"
+          async: true
+          description: "Inicia saga de provisionamento (8 etapas)"
+        - service: "analytics"
+          handler: "recordSignup"
+          async: true
+        - service: "crm"
+          handler: "createTenantRecord"
+          async: true
+
+    - id: "evt-tenant-provisioned"
+      name: "TenantProvisioned"
+      description: "Schema PostgreSQL criado e migrações executadas com sucesso"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.provisioned.v1"
+      routing_key: "{tenantId}.saas.tenant.provisioned"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            tenantId: { type: "uuid" }
+            schemaName: { type: "string" }
+            provisionedAt: { type: "datetime" }
+            durationMs: { type: "integer" }
+
+    - id: "evt-tenant-activated"
+      name: "TenantActivated"
+      description: "Tenant ativado e operacional"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.activated.v1"
+      routing_key: "{tenantId}.saas.tenant.activated"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            tenantId: { type: "uuid" }
+            planName: { type: "string" }
+            trialEndsAt: { type: "datetime" }
+            features: { type: "string[]" }
+
+      consumers:
+        - service: "billing"
+          handler: "activateBilling"
+          async: true
+        - service: "notifications"
+          handler: "sendWelcomeEmail"
+          async: true
+
+    - id: "evt-tenant-suspended"
+      name: "TenantSuspended"
+      description: "Tenant suspenso (inadimplência, termos)"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.suspended.v1"
+      routing_key: "{tenantId}.saas.tenant.suspended"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            tenantId: { type: "uuid" }
+            reason: { type: "enum", values: ["PAYMENT_DEFAULT", "TERMS_VIOLATION", "MANUAL", "TRIAL_EXPIRED"] }
+            details: { type: "string" }
+            suspendedAt: { type: "datetime" }
+
+      consumers:
+        - service: "auth"
+          handler: "revokeAllSessions"
+          async: true
+          description: "Revoga todas as sessões ativas do tenant"
+        - service: "gateway"
+          handler: "blockTenantAccess"
+          async: true
+          description: "Bloqueia roteamento para o tenant"
+
+    - id: "evt-tenant-reactivated"
+      name: "TenantReactivated"
+      description: "Tenant reativado após suspensão"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.reactivated.v1"
+      routing_key: "{tenantId}.saas.tenant.reactivated"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            tenantId: { type: "uuid" }
+            reactivatedAt: { type: "datetime" }
+            reason: { type: "string" }
+
+      consumers:
+        - service: "auth"
+          handler: "restoreAccess"
+          async: true
+        - service: "gateway"
+          handler: "unblockTenantAccess"
+          async: true
+
+    - id: "evt-tenant-cancelled"
+      name: "TenantCancelled"
+      description: "Assinatura do tenant foi cancelada"
+      version: "v1"
+      type: "com.bidflow.saas.tenant.cancelled.v1"
+      routing_key: "{tenantId}.saas.tenant.cancelled"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            tenantId: { type: "uuid" }
+            reason: { type: "enum", values: ["VOLUNTARY", "PAYMENT_DEFAULT", "MIGRATION", "OTHER"] }
+            feedback: { type: "string" }
+            effectiveDate: { type: "date" }
+
+    - id: "evt-plan-changed"
+      name: "PlanChanged"
+      description: "Tenant mudou de plano (upgrade ou downgrade)"
+      version: "v1"
+      type: "com.bidflow.saas.plan.changed.v1"
+      routing_key: "{tenantId}.saas.plan.changed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            tenantId: { type: "uuid" }
+            fromPlan: { type: "string" }
+            toPlan: { type: "string" }
+            changeType: { type: "enum", values: ["UPGRADE", "DOWNGRADE"] }
+            effectiveDate: { type: "date" }
+            priceDelta: { type: "decimal" }
+            quotasChanged: { type: "object" }
+            featuresGained: { type: "string[]" }
+            featuresLost: { type: "string[]" }
+
+      consumers:
+        - service: "quotas"
+          handler: "updateQuotaLimits"
+          async: true
+        - service: "billing"
+          handler: "generateAdjustmentInvoice"
+          async: true
+        - service: "gateway"
+          handler: "reloadFeatureGates"
+          async: true
+
+    - id: "evt-quota-exceeded"
+      name: "QuotaExceeded"
+      description: "Tenant excedeu limite de recurso"
+      version: "v1"
+      type: "com.bidflow.saas.quota.exceeded.v1"
+      routing_key: "{tenantId}.saas.quota.exceeded"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "tenantId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            tenantId: { type: "uuid" }
+            resource: { type: "string" }
+            currentUsage: { type: "integer" }
+            limit: { type: "integer" }
+            overage: { type: "integer" }
+            blocked: { type: "boolean" }
+
+      consumers:
+        - service: "billing"
+          handler: "chargeOverage"
+          async: true
+        - service: "notifications"
+          handler: "alertTenantAdmin"
+          async: true
+
+    - id: "evt-subscription-renewed"
+      name: "SubscriptionRenewed"
+      description: "Assinatura renovada automaticamente"
+      version: "v1"
+      type: "com.bidflow.saas.subscription.renewed.v1"
+      routing_key: "{tenantId}.saas.subscription.renewed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "subscriptionId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            subscriptionId: { type: "uuid" }
+            tenantId: { type: "uuid" }
+            planId: { type: "uuid" }
+            periodStart: { type: "date" }
+            periodEnd: { type: "date" }
+            amount: { type: "decimal" }
+            invoiceId: { type: "uuid" }
+
+    - id: "evt-invoice-created"
+      name: "InvoiceCreated"
+      description: "Nova fatura gerada"
+      version: "v1"
+      type: "com.bidflow.saas.invoice.created.v1"
+      routing_key: "{tenantId}.saas.invoice.created"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "invoiceId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            invoiceId: { type: "uuid" }
+            tenantId: { type: "uuid" }
+            number: { type: "string" }
+            amount: { type: "decimal" }
+            currency: { type: "string" }
+            dueDate: { type: "date" }
+            status: { type: "string" }
+
+    - id: "evt-invoice-paid"
+      name: "InvoicePaid"
+      description: "Fatura foi paga"
+      version: "v1"
+      type: "com.bidflow.saas.invoice.paid.v1"
+      routing_key: "{tenantId}.saas.invoice.paid"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "invoiceId" }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            invoiceId: { type: "uuid" }
+            tenantId: { type: "uuid" }
+            amount: { type: "decimal" }
+            paidAt: { type: "datetime" }
+            paymentMethod: { type: "string" }
+            paymentProvider: { type: "string" }
+            externalId: { type: "string" }
+
+  # ── APIs ──────────────────────────────────────────────────────────────────
+
+  apis:
+
+    - controller: "TenantsPublicController"
+      prefix: "/api/v1/tenants"
+      auth: "none"
+      tenant_isolation: false
+      description: "Endpoints públicos para autoatendimento (registro e verificação)"
+
+      endpoints:
+        - method: "POST"
+          path: "/register"
+          summary: "Registrar novo tenant (self-service)"
+          operation_id: "registerTenant"
+          dto: "RegisterTenantDto"
+          response: "TenantRegistrationResponseDto"
+          response_status: 201
+          idempotent: true
+          rate_limit:
+            by: "ip"
+            max: 3
+            window: "3600s"
+          audit: "TENANT_REGISTERED"
+
+        - method: "GET"
+          path: "/check-slug"
+          summary: "Verificar disponibilidade de slug"
+          operation_id: "checkSlugAvailability"
+          dto: "CheckSlugDto"
+          response: "SlugAvailabilityDto"
+          response_status: 200
+
+        - method: "GET"
+          path: "/plans"
+          summary: "Listar planos públicos disponíveis"
+          operation_id: "listPublicPlans"
+          response: "PlanResponseDto[]"
+          response_status: 200
+          cache:
+            ttl: 600
+            key_pattern: "public:plans"
+
+    - controller: "TenantsAdminController"
+      prefix: "/api/v1/admin/tenants"
+      auth: "required"
+      tenant_isolation: false
+      description: "Endpoints administrativos (SYS_ADMIN) para gestão global de tenants"
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Listar todos os tenants"
+          operation_id: "listAllTenants"
+          dto: "TenantFilterDto"
+          response: "PaginatedResponse<TenantResponseDto>"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter detalhes do tenant"
+          operation_id: "getTenantDetail"
+          response: "TenantDetailResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar tenant"
+          operation_id: "adminUpdateTenant"
+          dto: "AdminUpdateTenantDto"
+          response: "TenantResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          audit: "TENANT_UPDATED"
+
+        - method: "POST"
+          path: "/:id/suspend"
+          summary: "Suspender tenant"
+          operation_id: "suspendTenant"
+          dto: "SuspendTenantDto"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+          audit: "TENANT_SUSPENDED"
+
+        - method: "POST"
+          path: "/:id/reactivate"
+          summary: "Reativar tenant suspenso"
+          operation_id: "reactivateTenant"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+          audit: "TENANT_REACTIVATED"
+
+        - method: "POST"
+          path: "/:id/cancel"
+          summary: "Cancelar tenant"
+          operation_id: "cancelTenant"
+          dto: "CancelTenantDto"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+          audit: "TENANT_CANCELLED"
+
+        - method: "GET"
+          path: "/:id/audit-logs"
+          summary: "Listar audit logs do tenant"
+          operation_id: "listTenantAuditLogs"
+          dto: "TenantAuditLogQueryDto"
+          response: "PaginatedResponse<TenantAuditLogResponseDto>"
+          response_status: 200
+          permissions: ["saas.tenant.manage", "auth.audit.read"]
+
+        - method: "GET"
+          path: "/stats"
+          summary: "Estatísticas globais de tenants"
+          operation_id: "getTenantStats"
+          response: "TenantStatsDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          cache:
+            ttl: 300
+            key_pattern: "admin:tenant:stats"
+
+        - method: "POST"
+          path: "/:id/reprovision"
+          summary: "Reprovisionar schema do tenant"
+          operation_id: "reprovisionTenant"
+          response_status: 202
+          permissions: ["saas.tenant.manage"]
+          audit: "TENANT_REPROVISIONED"
+          description: "Recria o schema do tenant em caso de corrupção (último recurso)"
+
+    - controller: "TenantSelfServiceController"
+      prefix: "/api/v1/tenants/:tenantId"
+      auth: "required"
+      tenant_isolation: true
+      description: "Endpoints do próprio tenant para autogestão"
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Obter dados do próprio tenant"
+          operation_id: "getMyTenant"
+          response: "TenantSelfResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+        - method: "PATCH"
+          path: "/"
+          summary: "Atualizar configurações do tenant"
+          operation_id: "updateMyTenant"
+          dto: "UpdateTenantConfigDto"
+          response: "TenantSelfResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          audit: "CONFIG_UPDATED"
+
+        - method: "GET"
+          path: "/usage"
+          summary: "Obter uso atual de quotas"
+          operation_id: "getMyUsage"
+          response: "QuotaUsageResponseDto[]"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          cache:
+            ttl: 60
+            key_pattern: "{tenantId}:quotas"
+
+    - controller: "PlansController"
+      prefix: "/api/v1/admin/plans"
+      auth: "required"
+      tenant_isolation: false
+      description: "CRUD de planos (apenas SYS_ADMIN)"
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar novo plano"
+          operation_id: "createPlan"
+          dto: "CreatePlanDto"
+          response: "PlanResponseDto"
+          response_status: 201
+          permissions: ["saas.tenant.manage"]
+          audit: "PLAN_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar todos os planos"
+          operation_id: "listPlans"
+          response: "PlanResponseDto[]"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          cache:
+            ttl: 300
+            key_pattern: "admin:plans"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter detalhes do plano"
+          operation_id: "getPlan"
+          response: "PlanDetailResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar plano"
+          operation_id: "updatePlan"
+          dto: "UpdatePlanDto"
+          response: "PlanResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          audit: "PLAN_UPDATED"
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Desativar plano"
+          operation_id: "deprecatePlan"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+          audit: "PLAN_DEPRECATED"
+          description: "Muda status para DEPRECATED (não exclui — tenants existentes mantêm)"
+
+    - controller: "SubscriptionsController"
+      prefix: "/api/v1/tenants/:tenantId/subscription"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Obter assinatura atual"
+          operation_id: "getMySubscription"
+          response: "SubscriptionResponseDto"
+          response_status: 200
+
+        - method: "POST"
+          path: "/change-plan"
+          summary: "Solicitar mudança de plano"
+          operation_id: "requestPlanChange"
+          dto: "ChangePlanDto"
+          response: "SubscriptionResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+          audit: "PLAN_CHANGED"
+
+        - method: "POST"
+          path: "/cancel"
+          summary: "Cancelar assinatura"
+          operation_id: "cancelMySubscription"
+          dto: "CancelSubscriptionDto"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+          audit: "SUBSCRIPTION_CANCELED"
+
+    - controller: "DomainsController"
+      prefix: "/api/v1/tenants/:tenantId/domains"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Adicionar domínio customizado"
+          operation_id: "addDomain"
+          dto: "AddDomainDto"
+          response: "DomainResponseDto"
+          response_status: 201
+          permissions: ["saas.tenant.manage"]
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar domínios do tenant"
+          operation_id: "listDomains"
+          response: "DomainResponseDto[]"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+        - method: "POST"
+          path: "/:id/verify"
+          summary: "Verificar domínio (DNS)"
+          operation_id: "verifyDomain"
+          response: "DomainResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover domínio"
+          operation_id: "removeDomain"
+          response_status: 204
+          permissions: ["saas.tenant.manage"]
+
+        - method: "POST"
+          path: "/:id/primary"
+          summary: "Definir como domínio principal"
+          operation_id: "setPrimaryDomain"
+          response: "DomainResponseDto"
+          response_status: 200
+          permissions: ["saas.tenant.manage"]
+
+    - controller: "InvoicesController"
+      prefix: "/api/v1/tenants/:tenantId/invoices"
+      auth: "required"
+      tenant_isolation: true
+      description: "Faturamento do tenant (billing future-ready)"
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Listar faturas"
+          operation_id: "listInvoices"
+          dto: "InvoiceFilterDto"
+          response: "PaginatedResponse<InvoiceResponseDto>"
+          response_status: 200
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 12
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter fatura"
+          operation_id: "getInvoice"
+          response: "InvoiceDetailResponseDto"
+          response_status: 200
+
+        - method: "GET"
+          path: "/:id/pdf"
+          summary: "Download PDF da fatura"
+          operation_id: "downloadInvoicePdf"
+          response_status: 200
+          response_type: "application/pdf"
+
+    - controller: "BillingConfigController"
+      prefix: "/api/v1/tenants/:tenantId/billing"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/"
+          summary: "Obter configuração de billing"
+          operation_id: "getBillingConfig"
+          response: "BillingConfigResponseDto"
+          response_status: 200
+
+        - method: "POST"
+          path: "/payment-method"
+          summary: "Adicionar método de pagamento"
+          operation_id: "addPaymentMethod"
+          dto: "AddPaymentMethodDto"
+          response: "PaymentMethodResponseDto"
+          response_status: 201
+          audit: "BILLING_METHOD_CHANGED"
+
+        - method: "GET"
+          path: "/payment-methods"
+          summary: "Listar métodos de pagamento"
+          operation_id: "listPaymentMethods"
+          response: "PaymentMethodResponseDto[]"
+          response_status: 200
+
+        - method: "DELETE"
+          path: "/payment-methods/:id"
+          summary: "Remover método de pagamento"
+          operation_id: "removePaymentMethod"
+          response_status: 204
+          audit: "BILLING_METHOD_CHANGED"
+
+  # ── Permissões ───────────────────────────────────────────────────────────
+
+  permissions:
+
+    roles:
+      - id: "SYS_ADMIN"
+        label: "Administrador Global"
+        type: "admin"
+        policies:
+          - "saas.*"
+          - "auth.*"
+        is_system: true
+        tenant_bound: false
+
+      - id: "TENANT_ADMIN"
+        label: "Administrador do Tenant"
+        type: "admin"
+        policies:
+          - "saas.tenant.manage"
+          - "saas.billing.read"
+          - "saas.billing.write"
+        is_system: true
+        tenant_bound: true
+
+    permission_catalog:
+      - code: "saas.tenant.manage"
+        description: "Gerenciar configurações e ciclo de vida do tenant"
+      - code: "saas.billing.read"
+        description: "Consultar faturas e histórico de pagamentos"
+      - code: "saas.billing.write"
+        description: "Gerenciar métodos de pagamento e alterar plano"
+      - code: "saas.plans.read"
+        description: "Consultar catálogo de planos"
+
+  # ── Multi-tenant (Schema-per-tenant) ─────────────────────────────────────
+
+  multi_tenant:
+    isolation: "schema-per-tenant"
+    strategy: |
+      Schema-per-tenant com tabelas de controle globais no schema `public`.
+      Cada tenant recebe um schema PostgreSQL isolado (`tenant_<uuid>`)
+      contendo todas as tabelas de dados do negócio. O schema public contém
+      apenas metadados: tenants, plans, subscriptions, quota_usage e audit_logs.
+
+    schema_naming:
+      pattern: "tenant_{uuid_sem_hi fen}"
+      example: "tenant_770e8400e29b41d4a716446655440000"
+      max_length: 63
+
+    global_tables:
+      schema: "public"
+      tables:
+        - "tenants"
+        - "plans"
+        - "subscriptions"
+        - "quota_usage"
+        - "tenant_domains"
+        - "invoices"
+        - "tenant_audit_logs"
+
+    tenant_scoped_tables:
+      schema: "tenant_{uuid}"
+      tables:
+        - "users"
+        - "sessions"
+        - "roles"
+        - "permissions"
+        - "user_roles"
+        - "api_keys"
+        - "audit_logs"
+        - "rfps"
+        - "lots"
+        - "proposals"
+        - "auctions"
+        - "bids"
+        - "contracts"
+        - "suppliers"
+        - "budgets"
+        - "invoices_erp"
+        - "leads"
+        - "opportunities"
+        - "customers"
+
+    tenant_resolution:
+      strategy: "domain-based"
+      sources:
+        - name: "subdomain"
+          header: "Host"
+          pattern: "https://{slug}.bidflow.com"
+          priority: 1
+
+        - name: "custom_domain"
+          header: "Host"
+          lookup: "tenant_domains.domain"
+          priority: 2
+
+        - name: "header"
+          header: "X-Tenant-Id"
+          priority: 3
+          description: "Fallback para API keys e integrações"
+
+        - name: "jwt"
+          source: "JWT payload"
+          field: "tenantId"
+          priority: 4
+          validation: "comparar com X-Tenant-Id se presente"
+
+    prisma_middleware:
+      strategy: |
+        Um PrismaClient por schema de tenant, gerenciados por pool.
+        Resolução: extrair tenantId do JWT → lookup schemaName na tabela tenants
+        → obter PrismaClient do pool (criar se não existir) → executar query.
+      pool:
+        max_clients: 100
+        idle_timeout: 300
+        creation_strategy: "lazy"
+
+    isolation_enforcement:
+      - "Tabelas em schema_ de tenant são inacessíveis via queries sem tenant context"
+      - "Pool de conexão PostgreSQL usa search_path = tenant_{uuid} por sessão"
+      - "Migrations são executadas em cada schema individualmente"
+      - "Backup e restore por schema (não por database inteira)"
+
+  # ── Provisioning & Migrations ───────────────────────────────────────────
+
+  provisioning:
+    engine: "Prisma Migrate"
+    strategy: |
+      Uma única base de migrations global. Durante o provisionamento,
+      as migrations são executadas no schema do tenant (search_path).
+
+    steps:
+      - id: "generate-schema-name"
+        description: "Gerar schemaName a partir do UUID do tenant"
+        command: "tenant_{uuid sem hífen}"
+
+      - id: "create-schema"
+        description: "Criar schema PostgreSQL"
+        sql: "CREATE SCHEMA IF NOT EXISTS {schemaName} AUTHORIZATION bidflow"
+
+      - id: "run-migrations"
+        description: "Executar todas as migrations no schema"
+        command: "prisma migrate deploy --schema=./prisma/schema.prisma"
+        env:
+          DATABASE_URL: "postgresql://bidflow:****@host:5432/bidflow_db?schema={schemaName}"
+
+      - id: "seed-system-roles"
+        description: "Inserir roles padrão"
+        sql: |
+          INSERT INTO {schemaName}.roles (id, name, slug, description, is_system, created_at)
+          VALUES
+            (gen_random_uuid(), 'Administrador', 'tenant_admin', 'Acesso total', true, now()),
+            (gen_random_uuid(), 'Gerente', 'tenant_manager', 'Gerencia recursos', true, now()),
+            (gen_random_uuid(), 'Consultor', 'tenant_viewer', 'Acesso leitura', true, now()),
+            (gen_random_uuid(), 'Fornecedor', 'supplier', 'Acesso fornecedor', true, now());
+
+      - id: "seed-default-config"
+        description: "Inserir configurações padrão"
+        sql: |
+          INSERT INTO {schemaName}.tenant_config (id, locale, timezone, currency, date_format)
+          VALUES (gen_random_uuid(), 'pt-BR', 'America/Sao_Paulo', 'BRL', 'DD/MM/YYYY');
+
+    monitoring:
+      metrics:
+        - "provisioning_duration_seconds"
+        - "provisioning_success_total"
+        - "provisioning_failure_total"
+        - "active_schemas_total"
+      alerts:
+        - condition: "provisioning_failure_rate > 5%"
+          severity: "critical"
+          window: "1h"
+
+  # ── Resolução de Tenant ─────────────────────────────────────────────────
+
+  tenant_resolution_pipeline:
+
+    middleware: "TenantResolutionMiddleware"
+    description: |
+      Middleware global NestJS que resolve o tenantId a partir da requisição
+      e injeta no RequestContext. Aplica-se a todas as rotas /api/v1/*.
+
+    resolution_order:
+      - step: "Extrair slug do subdomínio (Host header)"
+        logic: |
+          Se Host = "empresa-exemplo.bidflow.com":
+            slug = "empresa-exemplo"
+            tenant = SELECT * FROM tenants WHERE slug = slug
+            Se não encontrado: 404
+
+      - step: "Extrair domínio customizado"
+        logic: |
+          Se Host corresponder a tenant_domains.domain:
+            tenant = SELECT t.* FROM tenants t
+              JOIN tenant_domains d ON d.tenant_id = t.id
+              WHERE d.domain = Host AND d.status = 'ACTIVE'
+
+      - step: "Extrair X-Tenant-Id header"
+        logic: |
+          Usado por API keys e integrações M2M
+          tenant = SELECT * FROM tenants WHERE id = header
+
+      - step: "Validar com JWT"
+        logic: |
+          Se usuário autenticado via JWT e X-Tenant-Id presente:
+            Verificar se token.tenantId == X-Tenant-Id
+            Se divergirem: 403 TENANT_MISMATCH
+
+    cache:
+      strategy: "Redis"
+      ttl: 300
+      key_pattern: "tenant:lookup:{lookupKey}"
+      invalidation: "on tenant update"
+
+  # ── Segurança ──────────────────────────────────────────────────────────
+
+  security:
+    schema_isolation:
+      - "Cada schema PostgreSQL é um namespace isolado — queries nunca cruzam schemas"
+      - "Usuário PostgreSQL 'bidflow' tem permissão apenas em schemas de tenant"
+      - "GRANT USAGE ON SCHEMA tenant_{uuid} TO bidflow (por schema)"
+      - "REVOKE ALL ON SCHEMA public FROM bidflow (apenas leitura em global)"
+
+    tenant_boundary:
+      - "Middleware de resolução de tenant falha com 403 se tenant não encontrado"
+      - "Toda query ao banco usa PrismaClient específico do schema do tenant"
+      - "Cache Redis prefixado por tenantId"
+      - "Filas RabbitMQ roteadas por tenantId"
+
+    data_retention:
+      - "Tenant cancelado: dados mantidos por 5 anos (LGPD art. 16)"
+      - "Anonimização: taxId, email, name substituídos por hash irreversível"
+      - "Exclusão total: DROP SCHEMA tenant_{uuid} CASCADE após 5 anos"
+
+    audit:
+      - "Todo evento de modificação no tenant gera TenantAuditLog"
+      - "Audit trail imutável (append-only)"
+      - "Retenção de audit logs: 5 anos"
+
+  # ── Observabilidade ───────────────────────────────────────────────────────
+
+  observability:
+
+    logging:
+      level: "info"
+      format: "json"
+      additional_onboarding: true
+      include:
+        - "tenantId"
+        - "slug"
+        - "schemaName"
+        - "operation"
+        - "provisioningDurationMs"
+        - "eventType"
+      sensitive_fields:
+        - "taxId"
+        - "adminEmail"
+        - "token"
+        - "paymentMethod"
+        - "externalId"
+
+    metrics:
+      - name: "bidflow_tenants_total"
+        type: "counter"
+        description: "Total de tenants registrados"
+        labels: ["status"]
+
+      - name: "bidflow_tenants_active"
+        type: "gauge"
+        description: "Tenants ativos no momento"
+        labels: ["plan"]
+
+      - name: "bidflow_provisioning_duration_seconds"
+        type: "histogram"
+        description: "Duração do provisionamento de tenant"
+        labels: ["plan"]
+        buckets: [1, 3, 5, 10, 20, 30, 60]
+
+      - name: "bidflow_provisioning_failures_total"
+        type: "counter"
+        description: "Falhas de provisionamento"
+        labels: ["stage"]
+
+      - name: "bidflow_plan_changes_total"
+        type: "counter"
+        description: "Mudanças de plano"
+        labels: ["type", "from_plan", "to_plan"]
+
+      - name: "bidflow_invoices_total"
+        type: "counter"
+        description: "Faturas geradas"
+        labels: ["status", "payment_provider"]
+
+      - name: "bidflow_tenant_resolution_duration_seconds"
+        type: "histogram"
+        description: "Duração da resolução de tenant por requisição"
+        buckets: [0.001, 0.005, 0.01, 0.05, 0.1]
+
+      - name: "bidflow_quota_exceeded_total"
+        type: "counter"
+        description: "Total de quotas excedidas"
+        labels: ["resource"]
+
+    tracing:
+      enabled: true
+      sampling_rate: 1.0
+      attributes:
+        - "tenant.id"
+        - "tenant.slug"
+        - "tenant.plan"
+        - "provisioning.stage"
+        - "provisioning.duration_ms"
+
+    alerts:
+      - name: "TenantProvisioningFailure"
+        condition: "rate(bidflow_provisioning_failures_total[5m]) > 0"
+        severity: "critical"
+        window: "5m"
+        description: "Falha no provisionamento de tenant — requer ação imediata"
+
+      - name: "TenantHighResolutionLatency"
+        condition: "histogram_quantile(0.99, bidflow_tenant_resolution_duration_seconds[5m]) > 0.1"
+        severity: "warning"
+        window: "5m"
+
+      - name: "TenantQuotaExceededRate"
+        condition: "rate(bidflow_quota_exceeded_total[1h]) > 50"
+        severity: "info"
+        window: "1h"
+
+  # ── AI Hooks ──────────────────────────────────────────────────────────────
+
+  ai_hooks:
+    inference_points:
+      - id: "ai-churn-prediction"
+        trigger: "TenantScheduledForCancellation"
+        description: "Prediz risco de churn baseado em padrão de uso e histórico"
+        service: "analytics"
+        model: "churn-predictor-v1"
+        mode: "async"
+        fallback:
+          action: "no_action"
+          reason: "AI unavailable"
+
+      - id: "ai-plan-recommendation"
+        trigger: "QuotaExceeded"
+        description: "Recomenda plano ideal baseado no padrão de consumo"
+        service: "analytics"
+        model: "plan-recommender-v1"
+        mode: "async"
+
+  # ── Billing (Future-Ready) ──────────────────────────────────────────────
+
+  billing_future_ready:
+    design: |
+      O módulo de billing foi projetado com abstração de provedor de pagamento
+      para suportar Stripe, Asaas, PagSeguro e Mercado Pago sem alteração
+      no domínio. A implementação concreta será adicionada em spec separada.
+
+    payment_providers:
+      - id: "stripe"
+        status: "planned"
+        features:
+          - "credit_card"
+          - "boleto"
+          - "pix"
+
+      - id: "asaas"
+        status: "planned"
+        features:
+          - "boleto"
+          - "pix"
+          - "credit_card"
+
+      - id: "pagseguro"
+        status: "planned"
+
+    domain_abstraction:
+      entities:
+        - "Invoice"        # Fatura com externalId para provedor
+        - "PaymentMethod"  # Cartão, boleto, pix (abstraído)
+        - "Transaction"    # Transação de pagamento
+
+      services:
+        - "PaymentGatewayPort"     # Interface (port)
+        - "StripePaymentAdapter"   # Adapter Stripe
+        - "AsaasPaymentAdapter"    # Adapter Asaas
+        - "InvoiceGenerationService"
+        - "SubscriptionBillingService"
+
+  # ── Documentação ─────────────────────────────────────────────────────────
+
+  documentation:
+    user_guide: "/docs/tenant/user-guide.md"
+    technical_docs: "/docs/tenant/technical-guide.md"
+    operations: "/docs/tenant/operations-runbook.md"
+    openapi: ".specify/specs/saas/tenant-openapi.yml"
+    adr:
+      - ".specify/specs/saas/tenant-adr-schema-per-tenant.md"
+      - ".specify/specs/saas/tenant-adr-tenant-resolution.md"
+      - ".specify/specs/saas/tenant-adr-migration-strategy.md"
+
+  # ── Exemplos de Uso ──────────────────────────────────────────────────────
+
+  examples:
+
+    - id: "ex-register-tenant"
+      description: "Registro self-service de novo tenant"
+      request:
+        endpoint: "POST /api/v1/tenants/register"
+        body:
+          slug: "empresa-exemplo"
+          legalName: "Empresa Exemplo Ltda"
+          taxId: "12.345.678/0001-90"
+          planSlug: "business"
+          admin:
+            name: "João Silva"
+            email: "joao@empresaexemplo.com.br"
+            password: "Str0ng!P@ssw0rd2026"
+          locale: "pt-BR"
+          timezone: "America/Sao_Paulo"
+      response:
+        status: 201
+        body:
+          tenantId: "770e8400-e29b-41d4-a716-446655440000"
+          slug: "empresa-exemplo"
+          schemaName: "tenant_770e8400e29b41d4a716446655440000"
+          status: "REGISTERING"
+          message: "Provisionamento iniciado. O tenant será ativado em até 30 segundos."
+
+    - id: "ex-get-tenant-status"
+      description: "Consultar status do tenant após provisionamento"
+      request:
+        endpoint: "GET /api/v1/tenants/770e8400-e29b-41d4-a716-446655440000"
+      response:
+        status: 200
+        body:
+          id: "770e8400-e29b-41d4-a716-446655440000"
+          slug: "empresa-exemplo"
+          status: "ACTIVE"
+          planName: "Business"
+          subscriptionStatus: "TRIAL"
+          trialEndsAt: "2026-05-29T10:00:00Z"
+          usersCount: 1
+          features: ["advancedReporting", "apiAccess", "customDomain"]
+          quotas: {"users": {"used": 1, "limit": 50}, "rfps": {"used": 0, "limit": 100}, "api_calls": {"used": 0, "limit": 50000}}
+
+    - id: "ex-change-plan"
+      description: "Solicitar mudança de plano para Enterprise"
+      request:
+        endpoint: "POST /api/v1/tenants/770e/subscription/change-plan"
+        body:
+          planSlug: "enterprise"
+          effectiveDate: "nextPeriod"
+      response:
+        status: 200
+        body:
+          subscriptionId: "880e8400-e29b-41d4-a716-446655440000"
+          fromPlan: "Business"
+          toPlan: "Enterprise"
+          changeType: "UPGRADE"
+          effectiveDate: "2026-06-15"
+          priceDelta: 700.00
+          featuresGained: ["autoBidding", "whiteLabel", "samlSso"]
+          quotas: {"users": {"old": 50, "new": "unlimited"}, "rfps": {"old": 100, "new": "unlimited"}}
+
+  # ── Testes ────────────────────────────────────────────────────────────────
+
+  tests:
+    unit:
+      required: true
+      coverage_minimum: 90
+      files:
+        - "src/tenant/domain/**/*.spec.ts"
+        - "src/tenant/application/**/*.spec.ts"
+
+    integration:
+      required: true
+      coverage_minimum: 80
+      files:
+        - "test/integration/tenant/provisioning.e2e-spec.ts"
+        - "test/integration/tenant/resolution.e2e-spec.ts"
+        - "test/integration/tenant/schema-isolation.e2e-spec.ts"
+        - "test/integration/tenant/subscription-flow.e2e-spec.ts"
+
+    contract:
+      required: true
+      files:
+        - "test/contract/tenant-contract.test.ts"
+
+    e2e:
+      required: true
+      files:
+        - "test/e2e/tenant/onboarding.e2e-spec.ts"
+        - "test/e2e/tenant/suspension.e2e-spec.ts"
+        - "test/e2e/tenant/plan-change.e2e-spec.ts"
+        - "test/e2e/tenant/cancellation.e2e-spec.ts"
+
+    scenarios:
+      - id: "t-full-onboarding"
+        description: "Registro → provisionamento → ativação em < 30s"
+        type: "performance"
+        critical: true
+
+      - id: "t-schema-isolation"
+        description: "Query em schema de tenant A não vê dados do tenant B"
+        type: "security"
+        critical: true
+
+      - id: "t-cross-tenant-access"
+        description: "Usuário autenticado não consegue acessar resources de outro tenant"
+        type: "security"
+        critical: true
+
+      - id: "t-domain-resolution"
+        description: "Resolução de tenant por subdomínio e X-Tenant-Id header"
+        type: "functional"
+
+      - id: "t-subscription-lifecycle"
+        description: "Trial → expired → upgrade → downgrade → cancel"
+        type: "functional"
+
+      - id: "t-quota-enforcement"
+        description: "Criação de recurso bloqueada quando quota excedida"
+        type: "functional"
+
+      - id: "t-provisioning-rollback"
+        description: "Falha no meio do provisioning executa rollback corretamente"
+        type: "resilience"
+
+      - id: "t-data-retention"
+        description: "Dados do tenant cancelado são mantidos por 5 anos"
+        type: "compliance"
+
+  # ── Checklist de Implementação ────────────────────────────────────────────
+
+  checklist:
+    pre_implementation:
+      - "[ ] ADR de schema-per-tenant revisado e aprovado pelo Architecture Board"
+      - "[ ] Estratégia de migrations multi-schema validada com DBA"
+      - "[ ] Pool de PrismaClient por schema projetado"
+      - "[ ] Resolução de tenant (subdomínio + header + JWT) definida"
+      - "[ ] OpenAPI contract do módulo tenant gerado"
+      - "[ ] Política de retenção de dados validada com compliance/LGPD"
+      - "[ ] Testes de schema isolation escritos e falhando (TDD)"
+
+    implementation:
+      - "[ ] Value Objects: TenantSlug, SchemaName, QuotaDefinition, BillingCycle, FeatureFlag"
+      - "[ ] Aggregate: TenantEntity (com state machine de 6 estados)"
+      - "[ ] Aggregate: PlanEntity (com preços, quotas, features)"
+      - "[ ] Aggregate: SubscriptionEntity (com trial, renew, cancel)"
+      - "[ ] Entity: QuotaUsage (counters por recurso)"
+      - "[ ] Entity: TenantDomain (verificação DNS)"
+      - "[ ] Entity: Invoice (billing future-ready)"
+      - "[ ] Entity: TenantAuditLog (append-only no schema public)"
+      - "[ ] Repository interfaces + Prisma implementations (global + per-schema)"
+      - "[ ] Saga orquestradora: TenantProvisioningSaga (8 etapas + compensação)"
+      - "[ ] TenantResolutionMiddleware (subdomínio → header → JWT)"
+      - "[ ] SchemaProvisioningService (CREATE SCHEMA + run migrations)"
+      - "[ ] QuotaEnforcementService (gRPC/protected decorator)"
+      - "[ ] FeatureGateService (checked em todos os módulos)"
+      - "[ ] PrismaClient pool manager (lazy creation por schema)"
+      - "[ ] Controllers: TenantsPublic, TenantsAdmin, TenantSelfService, Plans, Subscriptions, Domains, Invoices"
+      - "[ ] DTOs: RegisterTenantDto, CreatePlanDto, ChangePlanDto, AddDomainDto, etc."
+      - "[ ] Cache: resolução de tenant em Redis (TTL 5 min, invalidação on update)"
+      - "[ ] Eventos: TenantRegistered, TenantProvisioned, TenantActivated, etc."
+      - "[ ] Audit logging em toda modificação de tenant"
+
+    post_implementation:
+      - "[ ] Testes unitários com cobertura >= 90%"
+      - "[ ] Testes de integração: onboarding, schema isolation, subscription flow"
+      - "[ ] Testes de segurança: cross-tenant access, tenant isolation"
+      - "[ ] Testes de performance: provisioning < 30s"
+      - "[ ] Testes de rollback: falha no meio da saga"
+      - "[ ] Documentação OpenAPI/Swagger atualizada"
+      - "[ ] Dashboards Grafana: tenants ativos, provisioning, quotas"
+      - "[ ] Alertas configurados: provisioning failure, resolution latency"
+      - "[ ] Runbook de operações para reprovisionamento manual"

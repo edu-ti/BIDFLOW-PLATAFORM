@@ -1,0 +1,2813 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec: Módulo de CRM (Customer Relationship Management)
+# =============================================================================
+# Especificação completa do módulo de CRM do BidFlow Platform.
+# Abrange leads, customers, pipelines, oportunidades, atividades, tarefas
+# e timeline de interações. Suporte a multi-tenant, RBAC, soft delete,
+# event-driven e observabilidade enterprise.
+# Schema version: 1.0 | Spec-Driven Development
+# =============================================================================
+
+spec:
+  # ── Metadados ────────────────────────────────────────────────────────────
+  id: "bidflow-crm-001"
+  title: "Módulo de CRM (Customer Relationship Management)"
+  version: "1.0.0"
+  status: draft
+  context: "crm"
+  author: "Architecture Board"
+  created: "2026-05-15"
+  updated: "2026-05-15"
+
+  tags:
+    - "crm"
+    - "supporting-domain"
+    - "multi-tenant"
+    - "event-driven"
+    - "pipeline"
+
+  # ── Dependências ─────────────────────────────────────────────────────────
+  depends_on:
+    specs:
+      - "bidflow-auth-001"
+      - "bidflow-tenant-001"
+    services:
+      - "postgres"
+      - "redis"
+    apis: []
+
+  # ── Visão Geral ──────────────────────────────────────────────────────────
+  overview: |
+    ## Descrição
+    Módulo de CRM do BidFlow Platform — gestão do relacionamento com clientes,
+    fornecedores e leads. Gerencia todo o ciclo de vida do contato comercial
+    desde a captura do lead até o pós-venda, passando por pipeline de vendas,
+    oportunidades, atividades, tarefas e timeline completa de interações.
+
+    O CRM alimenta o core domain de Licitações com inteligência de mercado:
+    leads qualificados são convertidos em fornecedores, oportunidades geram
+    RFPs, e o histórico de interações fornece dados para o módulo de IA
+    (score de lead, predição de oportunidade, recomendação).
+
+    ## Objetivos de Negócio
+    1. Capturar e qualificar leads automaticamente (score preditivo)
+    2. Gerenciar pipeline de vendas com estágios configuráveis por tenant
+    3. Manter histórico completo de interações (timeline imutável)
+    4. Suportar workflow de oportunidade: criação → negociação → won/lost
+    5. Integrar com Licitações (lead → supplier, opportunity → RFP)
+
+    ## Critérios de Sucesso
+    - Lead capture-to-qualification < 24h (automated scoring)
+    - Pipeline visibility em tempo real < 1s refresh
+    - Zero perda de histórico (timeline append-only)
+    - 100% de rastreabilidade (quem fez o quê, quando)
+    - Suporte a N pipelines configuráveis por tenant
+
+  # ── Módulos ──────────────────────────────────────────────────────────────
+
+  modules:
+
+    - id: "crm-module"
+      name: "CRM — Customer Relationship Management"
+      description: "Gestão de leads, clientes, pipeline, oportunidades, atividades, tarefas e timeline"
+
+      entities:
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Lead
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Lead"
+          name: "Lead"
+          description: |
+            Contato comercial não qualificado ou em processo de qualificação.
+            Origem pode ser website, landing page, importação, indicação ou
+            API. O lead evolui por status até ser convertido em Customer
+            ou descartado. Score é calculado por IA (analytics) ou manual.
+          aggregate_root: true
+          persistence:
+            table: "leads"
+            indexes:
+              - fields: ["tenant_id", "email"]
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "assigned_to"]
+              - fields: ["tenant_id", "score"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: true
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+              description: "Identificador único do lead"
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Nome completo do contato"
+              example: "Carlos Almeida"
+
+            - name: "email"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Email do lead"
+
+            - name: "phone"
+              type: "string"
+              required: false
+              max_length: 30
+              description: "Telefone de contato"
+              example: "+5511999998888"
+
+            - name: "mobile"
+              type: "string"
+              required: false
+              max_length: 30
+              description: "Celular"
+
+            - name: "company"
+              type: "string"
+              required: false
+              max_length: 255
+              description: "Empresa do lead"
+
+            - name: "position"
+              type: "string"
+              required: false
+              max_length: 100
+              description: "Cargo do lead"
+              example: "Diretor de Compras"
+
+            - name: "department"
+              type: "string"
+              required: false
+              max_length: 100
+              description: "Departamento"
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "NEW"
+              values:
+                - "NEW"
+                - "CONTACTED"
+                - "QUALIFIED"
+                - "CONVERTED"
+                - "DISQUALIFIED"
+                - "ARCHIVED"
+              description: "Status de qualificação do lead"
+
+            - name: "source"
+              type: "enum"
+              required: true
+              default: "MANUAL"
+              values:
+                - "WEBSITE"
+                - "LANDING_PAGE"
+                - "REFERRAL"
+                - "IMPORT"
+                - "API"
+                - "SOCIAL_MEDIA"
+                - "EVENT"
+                - "INDICATION"
+                - "MANUAL"
+              description: "Origem do lead"
+
+            - name: "score"
+              type: "integer"
+              required: true
+              default: 0
+              min: 0
+              max: 100
+              description: "Score de qualificação (0-100)"
+
+            - name: "scoreCriteria"
+              type: "json"
+              required: false
+              description: "Critérios que compuseram o score"
+              example: '{"profileFit": 80, "engagement": 60, "budget": 70, "timing": 90}'
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+              description: "ID do usuário responsável"
+
+            - name: "assignedAt"
+              type: "datetime"
+              required: false
+
+            - name: "lastContactedAt"
+              type: "datetime"
+              required: false
+
+            - name: "lastContactedBy"
+              type: "uuid"
+              required: false
+
+            - name: "convertedToCustomerId"
+              type: "uuid"
+              required: false
+              description: "CustomerId após conversão (nullable)"
+
+            - name: "convertedAt"
+              type: "datetime"
+              required: false
+
+            - name: "convertedBy"
+              type: "uuid"
+              required: false
+
+            - name: "disqualificationReason"
+              type: "string"
+              required: false
+              max_length: 500
+              description: "Motivo da desqualificação"
+              example: "BUDGET_TOO_LOW | NOT_INTERESTED | DUPLICATE | INVALID_CONTACT"
+
+            - name: "tags"
+              type: "json"
+              required: false
+              default: "[]"
+              description: "Tags para categorização"
+              example: '["hot", "enterprise", "gov.br"]'
+
+            - name: "customFields"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Campos customizados configuráveis pelo tenant"
+              example: '{"industry": "technology", "companySize": "500-1000"}'
+
+            - name: "notes"
+              type: "text"
+              required: false
+              max_length: 5000
+              description: "Notas internas sobre o lead"
+
+            - name: "deletedAt"
+              type: "datetime"
+              required: false
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "email deve ser único dentro do mesmo tenant (ignorando soft deleted)"
+            - "score deve estar entre 0 e 100"
+            - "status CONVERTED exige convertedToCustomerId e convertedAt preenchidos"
+            - "status DISQUALIFIED exige disqualificationReason"
+            - "status só pode ir para ARCHIVED se NEW, CONTACTED ou DISQUALIFIED"
+            - "assignedAt deve ser preenchido quando assignedTo for definido"
+
+          relationships:
+            - type: "has_many"
+              entity: "Activity"
+              via: "leadId"
+              description: "Atividades associadas ao lead"
+
+            - type: "has_many"
+              entity: "Task"
+              via: "leadId"
+              description: "Tarefas associadas ao lead"
+
+            - type: "has_many"
+              entity: "TimelineEntry"
+              via: "leadId"
+              description: "Entradas da timeline do lead"
+
+            - type: "has_many"
+              entity: "Opportunity"
+              via: "leadId"
+              description: "Oportunidades geradas a partir do lead"
+
+            - type: "has_one"
+              entity: "Customer"
+              via: "leadId"
+              description: "Cliente convertido (nullable)"
+
+            - type: "belongs_to"
+              entity: "User"
+              via: "assignedTo"
+              description: "Usuário responsável (owner)"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Customer
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Customer"
+          name: "Cliente"
+          description: |
+            Entidade com vínculo comercial ativo ou histórico. Pode ser
+            originada de um lead convertido ou criada diretamente. Clientes
+            podem participar de licitações como fornecedores (via módulo ERP).
+            Possuem segmento, tier, dados fiscais e contratos associados.
+          aggregate_root: true
+          persistence:
+            table: "customers"
+            indexes:
+              - fields: ["tenant_id", "email"]
+              - fields: ["tenant_id", "tax_id"]
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "tier"]
+              - fields: ["tenant_id", "segment"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: true
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "legalName"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Nome/Razão social"
+              example: "Empresa Exemplo Ltda"
+
+            - name: "fantasyName"
+              type: "string"
+              required: false
+              max_length: 255
+              description: "Nome fantasia"
+
+            - name: "taxId"
+              type: "string"
+              required: true
+              max_length: 20
+              description: "CNPJ/CPF"
+              example: "12.345.678/0001-90"
+
+            - name: "email"
+              type: "string"
+              required: true
+              max_length: 255
+
+            - name: "phone"
+              type: "string"
+              required: false
+              max_length: 30
+
+            - name: "website"
+              type: "string"
+              required: false
+              max_length: 500
+
+            - name: "address"
+              type: "json"
+              required: false
+              description: "Endereço principal"
+              example: '{"street": "Av. Paulista, 1000", "city": "São Paulo", "state": "SP", "zipCode": "01310-100", "country": "BR"}'
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "ACTIVE"
+              values:
+                - "ACTIVE"
+                - "INACTIVE"
+                - "BLOCKED"
+                - "ARCHIVED"
+
+            - name: "segment"
+              type: "enum"
+              required: true
+              default: "PRIVATE"
+              values:
+                - "PUBLIC"
+                - "PRIVATE"
+                - "GOVERNMENT"
+                - "NGO"
+                - "INDIVIDUAL"
+
+            - name: "tier"
+              type: "enum"
+              required: true
+              default: "BRONZE"
+              values:
+                - "BRONZE"
+                - "SILVER"
+                - "GOLD"
+                - "PLATINUM"
+
+            - name: "tierChangedAt"
+              type: "datetime"
+              required: false
+              description: "Data da última mudança de tier"
+
+            - name: "leadId"
+              type: "uuid"
+              required: false
+              description: "Lead que originou este cliente (nullable)"
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+              description: "ID do usuário responsável (account manager)"
+
+            - name: "contacts"
+              type: "json"
+              required: false
+              description: "Contatos associados ao cliente"
+              example: '[{"name": "João", "email": "joao@empresa.com", "role": "COMPRAS", "phone": "11999990000"}]'
+
+            - name: "tags"
+              type: "json"
+              required: false
+              default: "[]"
+              example: '["vip", "recorrente", "contrato-ativo"]'
+
+            - name: "customFields"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "notes"
+              type: "text"
+              required: false
+              max_length: 10000
+
+            - name: "lastActivityAt"
+              type: "datetime"
+              required: false
+              description: "Data da última atividade registrada"
+
+            - name: "lastActivityType"
+              type: "string"
+              required: false
+              description: "Tipo da última atividade"
+              example: "MEETING | EMAIL | CALL | NOTE"
+
+            - name: "totalRevenue"
+              type: "decimal"
+              required: true
+              default: 0
+              precision: 14
+              scale: 2
+              description: "Receita total gerada pelo cliente"
+
+            - name: "wonOpportunities"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Total de oportunidades ganhas"
+
+            - name: "deletedAt"
+              type: "datetime"
+              required: false
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "taxId deve ser único dentro do mesmo tenant"
+            - "email deve ser único dentro do mesmo tenant"
+            - "status ACTIVE exige pelo menos 1 contato com email válido"
+            - "tier só pode ser alterado por regra de negócio ou manual (com audit)"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "Lead"
+              via: "leadId"
+              description: "Lead que originou o cliente"
+
+            - type: "belongs_to"
+              entity: "User"
+              via: "assignedTo"
+              description: "Account manager responsável"
+
+            - type: "has_many"
+              entity: "Opportunity"
+              via: "customerId"
+              description: "Oportunidades associadas ao cliente"
+
+            - type: "has_many"
+              entity: "Activity"
+              via: "customerId"
+              description: "Atividades registradas"
+
+            - type: "has_many"
+              entity: "Task"
+              via: "customerId"
+              description: "Tarefas associadas"
+
+            - type: "has_many"
+              entity: "TimelineEntry"
+              via: "customerId"
+
+            - type: "has_many"
+              entity: "Contract"
+              via: "supplierId"
+              description: "Contratos com este cliente como fornecedor"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Pipeline
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Pipeline"
+          name: "Pipeline (Funil de Vendas)"
+          description: |
+            Funil de vendas configurável pelo tenant. Cada pipeline possui
+            estágios (stages) ordenados que definem o fluxo de oportunidades.
+            Ex: Pipeline de Vendas Diretas → [Prospecção → Qualificação →
+            Proposta → Negociação → Fechamento]. O tenant pode ter múltiplos
+            pipelines (ex: Vendas Diretas, Parcerias, Licitações).
+          aggregate_root: true
+          persistence:
+            table: "pipelines"
+            indexes:
+              - fields: ["tenant_id", "slug"]
+                unique: true
+              - fields: ["tenant_id", "is_default"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "name"
+              type: "string"
+              required: true
+              max_length: 100
+              description: "Nome do pipeline"
+              example: "Vendas Diretas"
+
+            - name: "slug"
+              type: "string"
+              required: true
+              max_length: 50
+              description: "Identificador único do pipeline (por tenant)"
+              example: "vendas-diretas"
+
+            - name: "description"
+              type: "string"
+              required: false
+              max_length: 500
+
+            - name: "isDefault"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Pipeline padrão para novas oportunidades"
+
+            - name: "isActive"
+              type: "boolean"
+              required: true
+              default: true
+
+            - name: "stages"
+              type: "json"
+              required: true
+              description: "Estágios do pipeline (ordenados)"
+              example: |
+                [
+                  {"id": "prospecting", "name": "Prospecção", "order": 1, "probability": 10, "color": "#e8f5e9"},
+                  {"id": "qualification", "name": "Qualificação", "order": 2, "probability": 25, "color": "#c8e6c9"},
+                  {"id": "proposal", "name": "Proposta", "order": 3, "probability": 50, "color": "#a5d6a7"},
+                  {"id": "negotiation", "name": "Negociação", "order": 4, "probability": 75, "color": "#81c784"},
+                  {"id": "closing", "name": "Fechamento", "order": 5, "probability": 90, "color": "#66bb6a"}
+                ]
+
+            - name: "order"
+              type: "integer"
+              required: true
+              default: 0
+              description: "Ordem de exibição"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "slug é único dentro do tenant"
+            - "pipeline deve ter pelo menos 2 estágios"
+            - "order dos estágios deve ser sequencial (1, 2, 3...)"
+            - "probability de cada estágio deve estar entre 0 e 100"
+            - "probability deve ser crescente com order"
+            - "apenas 1 pipeline pode ser isDefault por tenant"
+
+          relationships:
+            - type: "has_many"
+              entity: "Opportunity"
+              via: "pipelineId"
+              description: "Oportunidades neste pipeline"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Opportunity
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Opportunity"
+          name: "Oportunidade"
+          description: |
+            Negócio em prospecção dentro de um pipeline. Representa uma
+            venda potencial com valor estimado, estágio, probabilidade e
+            data de fechamento esperada. Oportunidades vencidas (WON)
+            podem gerar RFPs no módulo de Licitações ou contratos no ERP.
+            Oportunidades perdidas (LOST) registram motivo para análise.
+          aggregate_root: true
+          persistence:
+            table: "opportunities"
+            indexes:
+              - fields: ["tenant_id", "pipeline_id", "stage"]
+              - fields: ["tenant_id", "customer_id"]
+              - fields: ["tenant_id", "lead_id"]
+              - fields: ["tenant_id", "assigned_to"]
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "expected_close_date"]
+            soft_delete: true
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "pipelineId"
+              type: "uuid"
+              required: true
+              description: "Pipeline ao qual pertence"
+
+            - name: "leadId"
+              type: "uuid"
+              required: false
+              description: "Lead de origem (nullable)"
+
+            - name: "customerId"
+              type: "uuid"
+              required: false
+              description: "Cliente associado (nullable)"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 255
+              description: "Título da oportunidade"
+              example: "Fornecimento de Equipamentos de TI"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 10000
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "OPEN"
+              values:
+                - "OPEN"
+                - "WON"
+                - "LOST"
+                - "ABANDONED"
+
+            - name: "stage"
+              type: "string"
+              required: true
+              description: "ID do estágio atual no pipeline"
+              example: "qualification"
+
+            - name: "stageOrder"
+              type: "integer"
+              required: true
+              description: "Ordem do estágio atual (desnormalizado)"
+
+            - name: "previousStage"
+              type: "string"
+              required: false
+              description: "Estágio anterior (para rollback)"
+
+            - name: "estimatedValue"
+              type: "decimal"
+              required: true
+              precision: 14
+              scale: 2
+              default: 0
+              description: "Valor estimado do negócio"
+
+            - name: "currency"
+              type: "string"
+              required: true
+              default: "BRL"
+
+            - name: "probability"
+              type: "integer"
+              required: true
+              default: 10
+              min: 0
+              max: 100
+              description: "Probabilidade de fechamento (%)"
+
+            - name: "expectedCloseDate"
+              type: "date"
+              required: false
+              description: "Data prevista de fechamento"
+
+            - name: "actualCloseDate"
+              type: "date"
+              required: false
+              description: "Data real de fechamento (WON/LOST)"
+
+            - name: "wonValue"
+              type: "decimal"
+              required: false
+              precision: 14
+              scale: 2
+              description: "Valor real do negócio ganho"
+
+            - name: "lostReason"
+              type: "string"
+              required: false
+              max_length: 500
+              description: "Motivo da perda"
+              example: "PRICE | COMPETITOR | TIMING | BUDGET | OTHER"
+
+            - name: "lostDetails"
+              type: "text"
+              required: false
+              description: "Detalhes adicionais da perda"
+
+            - name: "lostTo"
+              type: "string"
+              required: false
+              max_length: 255
+              description: "Concorrente que venceu (se aplicável)"
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: false
+              description: "ID do usuário responsável"
+
+            - name: "products"
+              type: "json"
+              required: false
+              description: "Produtos/serviços de interesse"
+              example: '[{"name": "Servidores", "quantity": 10, "estimatedValue": 500000}, {"name": "Switches", "quantity": 5, "estimatedValue": 150000}]'
+
+            - name: "tags"
+              type: "json"
+              required: false
+              default: "[]"
+              example: '["urgente", "alta-receita", "gov"]'
+
+            - name: "customFields"
+              type: "json"
+              required: false
+              default: "{}"
+
+            - name: "deletedAt"
+              type: "datetime"
+              required: false
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "status WON exige wonValue e actualCloseDate preenchidos"
+            - "status LOST exige lostReason"
+            - "stage deve ser um ID válido no pipeline associado"
+            - "estimatedValue deve ser >= 0"
+            - "probability deve estar entre 0 e 100"
+            - "stageOrder deve corresponder à order do stage no pipeline"
+            - "cliente ou lead deve estar preenchido (pelo menos 1)"
+
+          state_machine:
+            initial: "OPEN"
+            states:
+              - id: "OPEN"
+                label: "Aberta"
+                allowed_transitions: ["WON", "LOST", "ABANDONED"]
+
+              - id: "WON"
+                label: "Ganha"
+                final: true
+                description: "Negócio fechado com sucesso"
+
+              - id: "LOST"
+                label: "Perdida"
+                final: true
+                description: "Negócio perdido para concorrente ou cancelado"
+
+              - id: "ABANDONED"
+                label: "Abandonada"
+                final: true
+                description: "Negócio abandonado sem decisão"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "Pipeline"
+              via: "pipelineId"
+
+            - type: "belongs_to"
+              entity: "Lead"
+              via: "leadId"
+
+            - type: "belongs_to"
+              entity: "Customer"
+              via: "customerId"
+
+            - type: "belongs_to"
+              entity: "User"
+              via: "assignedTo"
+
+            - type: "has_many"
+              entity: "Activity"
+              via: "opportunityId"
+
+            - type: "has_many"
+              entity: "Task"
+              via: "opportunityId"
+
+            - type: "has_many"
+              entity: "TimelineEntry"
+              via: "opportunityId"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: Activity (Interação)
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Activity"
+          name: "Atividade/Interação"
+          description: |
+            Registro imutável de interação com lead/cliente/oportunidade.
+            Abrange emails, ligações, reuniões, notas, tarefas concluídas
+            e eventos do sistema. Cada atividade faz parte da timeline.
+          aggregate_root: false
+          persistence:
+            table: "activities"
+            indexes:
+              - fields: ["tenant_id", "lead_id"]
+              - fields: ["tenant_id", "customer_id"]
+              - fields: ["tenant_id", "opportunity_id"]
+              - fields: ["tenant_id", "type"]
+              - fields: ["tenant_id", "occurred_at"]
+              - fields: ["tenant_id", "created_by"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "type"
+              type: "enum"
+              required: true
+              values:
+                - "CALL"
+                - "EMAIL"
+                - "MEETING"
+                - "NOTE"
+                - "TASK_COMPLETED"
+                - "SYSTEM"
+                - "WHATSAPP"
+                - "VIDEO_CALL"
+                - "SITE_VISIT"
+                - "PROPOSAL_SENT"
+                - "CONTRACT_SIGNED"
+              description: "Tipo de atividade"
+
+            - name: "subject"
+              type: "string"
+              required: true
+              max_length: 500
+              description: "Assunto/resumo da atividade"
+              example: "Reunião de alinhamento sobre proposta"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 10000
+              description: "Descrição detalhada"
+
+            - name: "leadId"
+              type: "uuid"
+              required: false
+
+            - name: "customerId"
+              type: "uuid"
+              required: false
+
+            - name: "opportunityId"
+              type: "uuid"
+              required: false
+
+            - name: "occurredAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+              description: "Data/hora em que a atividade ocorreu"
+
+            - name: "createdBy"
+              type: "uuid"
+              required: true
+              description: "Usuário que registrou a atividade"
+
+            - name: "duration"
+              type: "integer"
+              required: false
+              description: "Duração em minutos (calls, meetings)"
+
+            - name: "outcome"
+              type: "string"
+              required: false
+              max_length: 500
+              description: "Resultado da atividade"
+              example: "Cliente demonstrou interesse, agendamos proposta"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Metadados específicos do tipo"
+              example: '{"callDuration": "15min", "callDirection": "outbound", "recordingUrl": null, "emailMessageId": "<abc@mail.com>"}'
+
+            - name: "isPinned"
+              type: "boolean"
+              required: true
+              default: false
+              description: "Atividade fixada no topo da timeline"
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "pelo menos um dos IDs (leadId, customerId, opportunityId) deve estar preenchido"
+            - "Activity é imutável após criada (append-only)"
+            - "activity type SYSTEM não pode ser criada manualmente — apenas por eventos do sistema"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Aggregate Root: Task
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "Task"
+          name: "Tarefa"
+          description: |
+            Ação pendente associada a um lead, cliente ou oportunidade.
+            Tarefas têm prazo, prioridade e responsável. Podem ser
+            recorrentes e geram atividades na timeline quando concluídas.
+          aggregate_root: true
+          persistence:
+            table: "tasks"
+            indexes:
+              - fields: ["tenant_id", "assigned_to", "status"]
+              - fields: ["tenant_id", "due_date", "status"]
+              - fields: ["tenant_id", "lead_id"]
+              - fields: ["tenant_id", "customer_id"]
+              - fields: ["tenant_id", "opportunity_id"]
+              - fields: ["tenant_id", "priority", "status"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+              immutable: true
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 500
+              description: "Título da tarefa"
+              example: "Enviar proposta comercial para João"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "status"
+              type: "enum"
+              required: true
+              default: "PENDING"
+              values:
+                - "PENDING"
+                - "IN_PROGRESS"
+                - "COMPLETED"
+                - "CANCELLED"
+
+            - name: "priority"
+              type: "enum"
+              required: true
+              default: "MEDIUM"
+              values:
+                - "LOW"
+                - "MEDIUM"
+                - "HIGH"
+                - "URGENT"
+
+            - name: "dueDate"
+              type: "datetime"
+              required: false
+              description: "Data limite para conclusão"
+
+            - name: "completedAt"
+              type: "datetime"
+              required: false
+
+            - name: "completedBy"
+              type: "uuid"
+              required: false
+
+            - name: "cancelledAt"
+              type: "datetime"
+              required: false
+
+            - name: "cancelledReason"
+              type: "string"
+              required: false
+              max_length: 500
+
+            - name: "leadId"
+              type: "uuid"
+              required: false
+
+            - name: "customerId"
+              type: "uuid"
+              required: false
+
+            - name: "opportunityId"
+              type: "uuid"
+              required: false
+
+            - name: "assignedTo"
+              type: "uuid"
+              required: true
+              description: "Usuário responsável pela execução"
+
+            - name: "assignedBy"
+              type: "uuid"
+              required: true
+              description: "Usuário que atribuiu a tarefa"
+
+            - name: "isRecurring"
+              type: "boolean"
+              required: true
+              default: false
+
+            - name: "recurrenceRule"
+              type: "string"
+              required: false
+              description: "Regra de recorrência (RRULE ou cron)"
+              example: "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+
+            - name: "reminderAt"
+              type: "datetime"
+              required: false
+              description: "Data do lembrete"
+
+            - name: "reminderSent"
+              type: "boolean"
+              required: true
+              default: false
+
+            - name: "tags"
+              type: "json"
+              required: false
+              default: "[]"
+              example: '["proposta", "urgente"]'
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+            - name: "updatedAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "pelo menos um dos IDs (leadId, customerId, opportunityId) deve estar preenchido"
+            - "status COMPLETED exige completedAt e completedBy"
+            - "dueDate pode ser passado (tarefa atrasada), mas gera alerta"
+            - "status CANCELLED exige cancelledReason se assignedTo != cancelledBy"
+
+          relationships:
+            - type: "belongs_to"
+              entity: "Lead"
+              via: "leadId"
+
+            - type: "belongs_to"
+              entity: "Customer"
+              via: "customerId"
+
+            - type: "belongs_to"
+              entity: "Opportunity"
+              via: "opportunityId"
+
+            - type: "belongs_to"
+              entity: "User"
+              via: "assignedTo"
+
+        # ─════════════════════════════════════════════════════════════════─
+        # Entity: TimelineEntry
+        # ─════════════════════════════════════════════════════════════════─
+
+        - id: "TimelineEntry"
+          name: "Entrada de Timeline"
+          description: |
+            Entrada imutável na timeline de um lead, cliente ou oportunidade.
+            A timeline consolida atividades, tarefas concluídas, mudanças de
+            estágio, eventos do sistema e notas em ordem cronológica reversa.
+            Funciona como feed de atividade do registro.
+          aggregate_root: false
+          persistence:
+            table: "timeline_entries"
+            indexes:
+              - fields: ["tenant_id", "lead_id", "occurred_at"]
+              - fields: ["tenant_id", "customer_id", "occurred_at"]
+              - fields: ["tenant_id", "opportunity_id", "occurred_at"]
+              - fields: ["tenant_id", "type", "occurred_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"
+              type: "uuid"
+              required: true
+
+            - name: "tenantId"
+              type: "uuid"
+              required: true
+
+            - name: "type"
+              type: "enum"
+              required: true
+              values:
+                - "ACTIVITY"
+                - "TASK_COMPLETED"
+                - "STAGE_CHANGED"
+                - "STATUS_CHANGED"
+                - "OWNER_CHANGED"
+                - "TIER_CHANGED"
+                - "NOTE_ADDED"
+                - "EMAIL_SENT"
+                - "EMAIL_RECEIVED"
+                - "CALL_LOGGED"
+                - "MEETING_LOGGED"
+                - "PROPOSAL_SENT"
+                - "CONTRACT_SIGNED"
+                - "SYSTEM_EVENT"
+                - "SCORE_CHANGED"
+                - "LEAD_CONVERTED"
+                - "OPPORTUNITY_WON"
+                - "OPPORTUNITY_LOST"
+
+            - name: "leadId"
+              type: "uuid"
+              required: false
+
+            - name: "customerId"
+              type: "uuid"
+              required: false
+
+            - name: "opportunityId"
+              type: "uuid"
+              required: false
+
+            - name: "activityId"
+              type: "uuid"
+              required: false
+              description: "Referência à atividade (se type = ACTIVITY)"
+
+            - name: "taskId"
+              type: "uuid"
+              required: false
+              description: "Referência à tarefa (se type = TASK_COMPLETED)"
+
+            - name: "title"
+              type: "string"
+              required: true
+              max_length: 500
+              description: "Título exibido na timeline"
+              example: "Proposta enviada para o cliente"
+
+            - name: "description"
+              type: "text"
+              required: false
+              max_length: 5000
+
+            - name: "occurredAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+              description: "Data/hora do evento (ordenação)"
+
+            - name: "createdBy"
+              type: "uuid"
+              required: false
+              description: "Usuário que gerou a entrada"
+
+            - name: "metadata"
+              type: "json"
+              required: false
+              default: "{}"
+              description: "Dados adicionais para renderização"
+              example: '{"fromStage": "prospecting", "toStage": "qualification", "changedBy": "user-id"}'
+
+            - name: "createdAt"
+              type: "datetime"
+              required: true
+              default: "now()"
+
+          invariants:
+            - "TimelineEntry é imutável (append-only) — nunca pode ser alterada ou deletada"
+            - "pelo menos um dos IDs (leadId, customerId, opportunityId) deve estar preenchido"
+            - "se type = ACTIVITY, activityId é obrigatório"
+            - "se type = STAGE_CHANGED, metadata deve conter fromStage e toStage"
+
+      # ── Value Objects ──────────────────────────────────────────────────
+
+      value_objects:
+
+        - id: "ContactInfo"
+          description: "Informações de contato"
+          attributes:
+            - name: "email"
+              type: "string"
+              max_length: 255
+            - name: "phone"
+              type: "string"
+              max_length: 30
+              required: false
+            - name: "mobile"
+              type: "string"
+              max_length: 30
+              required: false
+            - name: "position"
+              type: "string"
+              max_length: 100
+              required: false
+            - name: "department"
+              type: "string"
+              max_length: 100
+              required: false
+
+        - id: "Address"
+          description: "Endereço completo"
+          attributes:
+            - name: "street"
+              type: "string"
+              max_length: 255
+            - name: "number"
+              type: "string"
+              max_length: 20
+            - name: "complement"
+              type: "string"
+              max_length: 100
+              required: false
+            - name: "neighborhood"
+              type: "string"
+              max_length: 100
+            - name: "city"
+              type: "string"
+              max_length: 100
+            - name: "state"
+              type: "string"
+              max_length: 50
+            - name: "zipCode"
+              type: "string"
+              max_length: 10
+            - name: "country"
+              type: "string"
+              max_length: 50
+              default: "BR"
+
+        - id: "LeadSource"
+          description: "Origem do lead"
+          attributes:
+            - name: "channel"
+              type: "enum"
+              values: ["WEBSITE", "LANDING_PAGE", "REFERRAL", "IMPORT", "API", "SOCIAL_MEDIA", "EVENT", "INDICATION", "MANUAL"]
+            - name: "campaign"
+              type: "string"
+              required: false
+              description: "Campanha de marketing que gerou o lead"
+            - name: "referrer"
+              type: "string"
+              required: false
+              description: "URL de referência"
+
+        - id: "PipelineStage"
+          description: "Estágio do pipeline"
+          attributes:
+            - name: "id"
+              type: "string"
+              max_length: 50
+            - name: "name"
+              type: "string"
+              max_length: 100
+            - name: "order"
+              type: "integer"
+              minimum: 1
+            - name: "probability"
+              type: "integer"
+              min: 0
+              max: 100
+            - name: "color"
+              type: "string"
+              required: false
+              description: "Código hex da cor (ex: #81c784)"
+
+        - id: "Tag"
+          description: "Tag para categorização"
+          attributes:
+            - name: "value"
+              type: "string"
+              max_length: 50
+            - name: "color"
+              type: "string"
+              required: false
+              description: "Cor da tag (hex)"
+            - name: "group"
+              type: "string"
+              required: false
+              description: "Grupo de tags (ex: setor, prioridade)"
+
+        - id: "Probability"
+          description: "Probabilidade percentual"
+          attributes:
+            - name: "value"
+              type: "integer"
+              min: 0
+              max: 100
+          invariants:
+            - "value deve estar entre 0 e 100"
+
+        - id: "OpportunityStageChange"
+          description: "Registro de mudança de estágio"
+          attributes:
+            - name: "fromStage"
+              type: "string"
+            - name: "toStage"
+              type: "string"
+            - name: "changedAt"
+              type: "datetime"
+            - name: "changedBy"
+              type: "uuid"
+            - name: "reason"
+              type: "string"
+              required: false
+
+  # ── Regras de Negócio ─────────────────────────────────────────────────────
+
+  business_rules:
+
+    - id: "CRM-BR-001"
+      title: "Email único por lead"
+      description: "Email do lead deve ser único dentro do mesmo tenant (exceto leads deletados)"
+      scope: "Lead.email"
+      type: "hard"
+      error_code: "LEAD_EMAIL_DUPLICATE"
+      expression: "count(leads where email = x and tenantId = y and deletedAt is null) = 0"
+
+    - id: "CRM-BR-002"
+      title: "Score válido"
+      description: "Score do lead deve estar entre 0 e 100"
+      scope: "Lead.score"
+      type: "hard"
+      error_code: "INVALID_SCORE"
+      expression: "score >= 0 AND score <= 100"
+
+    - id: "CRM-BR-003"
+      title: "Lead já convertido"
+      description: "Lead com status CONVERTED não pode ser alterado (exceto notas)"
+      scope: "Lead"
+      type: "hard"
+      error_code: "LEAD_ALREADY_CONVERTED"
+      expression: "status != 'CONVERTED' OR (status == 'CONVERTED' AND only notes changed)"
+
+    - id: "CRM-BR-004"
+      title: "Conversão completa"
+      description: "Lead convertido deve ter customerId e data de conversão preenchidos"
+      scope: "Lead"
+      type: "hard"
+      error_code: "INCOMPLETE_CONVERSION"
+      expression: "(status == 'CONVERTED') == (convertedToCustomerId is not null AND convertedAt is not null)"
+
+    - id: "CRM-BR-005"
+      title: "TaxId único por cliente"
+      description: "CNPJ/CPF deve ser único dentro do mesmo tenant"
+      scope: "Customer.taxId"
+      type: "hard"
+      error_code: "CUSTOMER_TAXID_DUPLICATE"
+      expression: "count(customers where taxId = x and tenantId = y and deletedAt is null) = 0"
+
+    - id: "CRM-BR-006"
+      title: "Pipeline com estágios"
+      description: "Pipeline deve ter pelo menos 2 estágios configurados"
+      scope: "Pipeline.stages"
+      type: "hard"
+      error_code: "PIPELINE_MIN_STAGES"
+      expression: "length(stages) >= 2"
+
+    - id: "CRM-BR-007"
+      title: "Estágio crescente"
+      description: "Probabilidade dos estágios deve ser crescente com a ordem"
+      scope: "Pipeline.stages"
+      type: "hard"
+      error_code: "PIPELINE_STAGE_PROBABILITY"
+      expression: "for each i: stages[i].probability < stages[i+1].probability"
+
+    - id: "CRM-BR-008"
+      title: "Estágio válido na oportunidade"
+      description: "Estágio da oportunidade deve existir no pipeline associado"
+      scope: "Opportunity.stage"
+      type: "hard"
+      error_code: "INVALID_STAGE"
+      expression: "stage in pipeline.stages[].id"
+
+    - id: "CRM-BR-009"
+      title: "Motivo de perda obrigatório"
+      description: "Oportunidade perdida deve ter motivo e detalhes preenchidos"
+      scope: "Opportunity"
+      type: "hard"
+      error_code: "LOST_REASON_REQUIRED"
+      expression: "(status == 'LOST') == (lostReason is not null)"
+
+    - id: "CRM-BR-010"
+      title: "Valor ganho positivo"
+      description: "Valor real de oportunidade ganha deve ser > 0"
+      scope: "Opportunity.wonValue"
+      type: "hard"
+      error_code: "INVALID_WON_VALUE"
+      expression: "(status == 'WON') AND wonValue > 0"
+
+    - id: "CRM-BR-011"
+      title: "Pelo menos uma entidade vinculada"
+      description: "Atividade deve estar vinculada a pelo menos um registro (lead, customer ou opportunity)"
+      scope: "Activity"
+      type: "hard"
+      error_code: "ACTIVITY_NO_REFERENCE"
+      expression: "leadId is not null OR customerId is not null OR opportunityId is not null"
+
+    - id: "CRM-BR-012"
+      title: "Tarefa com responsável"
+      description: "Toda tarefa deve ter um responsável atribuído"
+      scope: "Task.assignedTo"
+      type: "hard"
+      error_code: "TASK_NO_OWNER"
+      expression: "assignedTo is not null"
+
+    - id: "CRM-BR-013"
+      title: "Timeline imutável"
+      description: "Entradas de timeline não podem ser alteradas ou removidas"
+      scope: "TimelineEntry"
+      type: "hard"
+      error_code: "TIMELINE_READONLY"
+      expression: "update e delete operations blocked"
+
+  # ── Workflows ─────────────────────────────────────────────────────────────
+
+  workflows:
+
+    - id: "wf-lead-qualification"
+      name: "Qualificação de Lead"
+      description: "Fluxo de qualificação do lead até conversão ou descarte"
+      trigger: "Lead.status → NEW"
+
+      stages:
+        - id: "CAPTURE"
+          label: "Captura"
+          description: "Lead é registrado (manual, website, API, import)"
+          output: "Lead.status = NEW"
+
+        - id: "SCORE"
+          label: "Score"
+          description: "IA calcula score preditivo (ou manual)"
+          ai_hook: "ai-lead-scoring"
+
+        - id: "CONTACT"
+          label: "Tentativa de contato"
+          description: "Primeira tentativa de contato (email/call)"
+          conditions:
+            - "score >= minScore OU assignedTo escolheu contatar"
+
+        - id: "QUALIFY"
+          label: "Qualificar"
+          description: "Lead atingiu score mínimo e/ou foi qualificado manualmente"
+          output: "Lead.status = QUALIFIED"
+          events: ["LeadQualified"]
+
+        - id: "CONVERT"
+          label: "Converter em Cliente"
+          description: "Lead qualificado é convertido em Customer"
+          conditions:
+            - "status == QUALIFIED"
+            - "dados mínimos preenchidos (nome, email, empresa)"
+          steps:
+            - "Criar Customer a partir dos dados do Lead"
+            - "Vincular customerId no Lead"
+            - "Transicionar Lead.status → CONVERTED"
+            - "Copiar atividades do Lead para o Customer"
+          events: ["LeadConverted"]
+
+        - id: "DISQUALIFY"
+          label: "Desqualificar"
+          description: "Lead não atende critérios ou perdeu interesse"
+          steps:
+            - "Registrar disqualificationReason"
+            - "Transicionar Lead.status → DISQUALIFIED"
+          events: ["LeadDisqualified"]
+
+    - id: "wf-opportunity-pipeline"
+      name: "Fluxo de Pipeline de Oportunidade"
+      description: "Avanço de oportunidade pelos estágios do pipeline"
+      trigger: "Opportunity.created"
+
+      stages:
+        - id: "MOVE_STAGE"
+          label: "Avançar estágio"
+          description: "Oportunidade avança para o próximo estágio"
+          conditions:
+            - "novo estágio tem order > estágio atual"
+            - "atividades obrigatórias do estágio atual concluídas"
+
+        - id: "REGRESS_STAGE"
+          label: "Regredir estágio"
+          description: "Oportunidade volta para estágio anterior"
+          conditions:
+            - "justificativa preenchida"
+
+        - id: "WIN"
+          label: "Ganhar oportunidade"
+          description: "Negócio fechado com sucesso"
+          conditions:
+            - "wonValue > 0"
+          steps:
+            - "Registrar actualCloseDate = today()"
+            - "Registrar wonValue"
+            - "Transicionar status → WON"
+            - "Atualizar Customer.totalRevenue e wonOpportunities"
+            - "Gerar evento OpportunityWon → Bidding: criar RFP"
+          events: ["OpportunityWon"]
+
+        - id: "LOSE"
+          label: "Perder oportunidade"
+          description: "Negócio perdido"
+          steps:
+            - "Registrar actualCloseDate = today()"
+            - "Registrar lostReason e lostDetails"
+            - "Transicionar status → LOST"
+            - "Registrar lostTo se concorrente"
+          events: ["OpportunityLost"]
+
+    - id: "wf-convert-lead-to-supplier"
+      name: "Conversão de Lead em Fornecedor"
+      description: "Cross-context: lead qualificado vira supplier no ERP e pode participar de licitações"
+      trigger: "LeadConverted"
+
+      stages:
+        - id: "CREATE_SUPPLIER"
+          label: "Criar fornecedor"
+          description: "Criar Supplier no módulo ERP com dados do Customer"
+          context: "ERP"
+          publish_event: "SupplierQualified"
+
+        - id: "NOTIFY_BIDDING"
+          label: "Notificar licitações"
+          description: "Habilitar fornecedor para participar de licitações"
+          context: "Bidding"
+
+  # ── Eventos ───────────────────────────────────────────────────────────────
+
+  events:
+
+    - id: "evt-lead-captured"
+      name: "LeadCaptured"
+      description: "Novo lead registrado na plataforma"
+      version: "v1"
+      type: "com.bidflow.crm.lead.captured.v1"
+      routing_key: "{tenantId}.crm.lead.captured"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "leadId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            leadId: { type: "uuid" }
+            name: { type: "string" }
+            email: { type: "string" }
+            company: { type: "string" }
+            source: { type: "string" }
+            score: { type: "integer" }
+      consumers:
+        - service: "analytics"
+          handler: "scoreLead"
+          async: true
+
+    - id: "evt-lead-qualified"
+      name: "LeadQualified"
+      description: "Lead atingiu score mínimo e foi qualificado"
+      version: "v1"
+      type: "com.bidflow.crm.lead.qualified.v1"
+      routing_key: "{tenantId}.crm.lead.qualified"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "leadId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            leadId: { type: "uuid" }
+            score: { type: "integer" }
+            qualifiedAt: { type: "datetime" }
+            assignedTo: { type: "uuid" }
+      consumers:
+        - service: "erp"
+          handler: "createSupplierDraft"
+          async: true
+
+    - id: "evt-lead-converted"
+      name: "LeadConverted"
+      description: "Lead convertido em Customer"
+      version: "v1"
+      type: "com.bidflow.crm.lead.converted.v1"
+      routing_key: "{tenantId}.crm.lead.converted"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "leadId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            leadId: { type: "uuid" }
+            customerId: { type: "uuid" }
+            customerName: { type: "string" }
+            taxId: { type: "string" }
+            tier: { type: "string" }
+            convertedAt: { type: "datetime" }
+      consumers:
+        - service: "erp"
+          handler: "activateSupplier"
+          async: true
+        - service: "analytics"
+          handler: "trainConversionModel"
+          async: true
+
+    - id: "evt-lead-disqualified"
+      name: "LeadDisqualified"
+      description: "Lead desqualificado"
+      version: "v1"
+      type: "com.bidflow.crm.lead.disqualified.v1"
+      routing_key: "{tenantId}.crm.lead.disqualified"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "leadId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            leadId: { type: "uuid" }
+            reason: { type: "string" }
+
+    - id: "evt-opportunity-created"
+      name: "OpportunityCreated"
+      description: "Nova oportunidade criada"
+      version: "v1"
+      type: "com.bidflow.crm.opportunity.created.v1"
+      routing_key: "{tenantId}.crm.opportunity.created"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "opportunityId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            opportunityId: { type: "uuid" }
+            customerId: { type: "uuid" }
+            title: { type: "string" }
+            estimatedValue: { type: "decimal" }
+            stage: { type: "string" }
+            probability: { type: "integer" }
+            expectedCloseDate: { type: "date" }
+
+    - id: "evt-opportunity-stage-changed"
+      name: "OpportunityStageChanged"
+      description: "Oportunidade mudou de estágio no pipeline"
+      version: "v1"
+      type: "com.bidflow.crm.opportunity.stage_changed.v1"
+      routing_key: "{tenantId}.crm.opportunity.stage_changed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "opportunityId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            opportunityId: { type: "uuid" }
+            fromStage: { type: "string" }
+            toStage: { type: "string" }
+            changedBy: { type: "uuid" }
+
+    - id: "evt-opportunity-won"
+      name: "OpportunityWon"
+      description: "Oportunidade ganha"
+      version: "v1"
+      type: "com.bidflow.crm.opportunity.won.v1"
+      routing_key: "{tenantId}.crm.opportunity.won"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "opportunityId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          required: true
+          properties:
+            opportunityId: { type: "uuid" }
+            customerId: { type: "uuid" }
+            customerName: { type: "string" }
+            wonValue: { type: "decimal" }
+            products: { type: "array" }
+            closeDate: { type: "date" }
+      consumers:
+        - service: "bidding"
+          handler: "createRfpFromOpportunity"
+          async: true
+        - service: "analytics"
+          handler: "trainWinModel"
+          async: true
+
+    - id: "evt-opportunity-lost"
+      name: "OpportunityLost"
+      description: "Oportunidade perdida"
+      version: "v1"
+      type: "com.bidflow.crm.opportunity.lost.v1"
+      routing_key: "{tenantId}.crm.opportunity.lost"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "opportunityId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            opportunityId: { type: "uuid" }
+            customerId: { type: "uuid" }
+            estimatedValue: { type: "decimal" }
+            lostReason: { type: "string" }
+            lostTo: { type: "string" }
+
+    - id: "evt-customer-tier-changed"
+      name: "CustomerTierChanged"
+      description: "Tier do cliente foi alterado"
+      version: "v1"
+      type: "com.bidflow.crm.customer.tier_changed.v1"
+      routing_key: "{tenantId}.crm.customer.tier_changed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "customerId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            customerId: { type: "uuid" }
+            oldTier: { type: "string" }
+            newTier: { type: "string" }
+            reason: { type: "string" }
+            changedBy: { type: "uuid" }
+      consumers:
+        - service: "erp"
+          handler: "updatePaymentTerms"
+          async: true
+        - service: "saas"
+          handler: "updatePlanQuotas"
+          async: true
+
+    - id: "evt-task-completed"
+      name: "TaskCompleted"
+      description: "Tarefa concluída"
+      version: "v1"
+      type: "com.bidflow.crm.task.completed.v1"
+      routing_key: "{tenantId}.crm.task.completed"
+
+      payload:
+        eventId: { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true, description: "taskId" }
+        tenantId: { type: "uuid", required: true }
+        timestamp: { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            taskId: { type: "uuid" }
+            title: { type: "string" }
+            completedBy: { type: "uuid" }
+            leadId: { type: "uuid" }
+            customerId: { type: "uuid" }
+            opportunityId: { type: "uuid" }
+      consumers:
+        - service: "crm"
+          handler: "addTimelineEntry"
+          async: true
+
+  # ── APIs ──────────────────────────────────────────────────────────────────
+
+  apis:
+
+    - controller: "LeadsController"
+      prefix: "/api/v1/crm/leads"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar lead"
+          operation_id: "createLead"
+          dto: "CreateLeadDto"
+          response: "LeadResponseDto"
+          response_status: 201
+          permissions: ["crm.lead.create"]
+          idempotent: true
+          audit: "LEAD_CREATED"
+
+        - method: "POST"
+          path: "/batch"
+          summary: "Importar leads em lote"
+          operation_id: "batchCreateLeads"
+          dto: "BatchCreateLeadsDto"
+          response: "BatchOperationResponseDto"
+          response_status: 201
+          permissions: ["crm.lead.create"]
+          audit: "LEADS_BATCH_CREATED"
+          rate_limit:
+            by: "user"
+            max: 10
+            window: "3600s"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar leads"
+          operation_id: "listLeads"
+          dto: "LeadFilterDto"
+          response: "PaginatedResponse<LeadResponseDto>"
+          response_status: 200
+          permissions: ["crm.lead.read"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+            - param: "sort"
+              value: "createdAt_desc"
+          filters:
+            - "status"
+            - "source"
+            - "score_min"
+            - "score_max"
+            - "assignedTo"
+            - "tag"
+            - "search"          # name + email + company
+            - "createdAt_from"
+            - "createdAt_to"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter lead"
+          operation_id: "getLead"
+          response: "LeadDetailResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar lead"
+          operation_id: "updateLead"
+          dto: "UpdateLeadDto"
+          response: "LeadResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.update"]
+          audit: "LEAD_UPDATED"
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Soft delete lead"
+          operation_id: "deleteLead"
+          response_status: 204
+          permissions: ["crm.lead.delete"]
+          audit: "LEAD_DELETED"
+
+        - method: "POST"
+          path: "/:id/qualify"
+          summary: "Qualificar lead manualmente"
+          operation_id: "qualifyLead"
+          dto: "QualifyLeadDto"
+          response: "LeadResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.update"]
+          audit: "LEAD_QUALIFIED"
+
+        - method: "POST"
+          path: "/:id/disqualify"
+          summary: "Desqualificar lead"
+          operation_id: "disqualifyLead"
+          dto: "DisqualifyLeadDto"
+          response: "LeadResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.update"]
+          audit: "LEAD_DISQUALIFIED"
+
+        - method: "POST"
+          path: "/:id/convert"
+          summary: "Converter lead em cliente"
+          operation_id: "convertLeadToCustomer"
+          dto: "ConvertLeadDto"
+          response: "ConvertLeadResponseDto"
+          response_status: 201
+          permissions: ["crm.lead.convert"]
+          audit: "LEAD_CONVERTED"
+
+        - method: "POST"
+          path: "/:id/assign"
+          summary: "Atribuir lead a usuário"
+          operation_id: "assignLead"
+          dto: "AssignOwnerDto"
+          response: "LeadResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.update"]
+          audit: "LEAD_ASSIGNED"
+
+        - method: "POST"
+          path: "/:id/merge"
+          summary: "Mesclar leads duplicados"
+          operation_id: "mergeLeads"
+          dto: "MergeLeadsDto"
+          response: "LeadResponseDto"
+          response_status: 200
+          permissions: ["crm.lead.manage"]
+          audit: "LEADS_MERGED"
+
+    - controller: "CustomersController"
+      prefix: "/api/v1/crm/customers"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar cliente"
+          operation_id: "createCustomer"
+          dto: "CreateCustomerDto"
+          response: "CustomerResponseDto"
+          response_status: 201
+          permissions: ["crm.customer.create"]
+          audit: "CUSTOMER_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar clientes"
+          operation_id: "listCustomers"
+          dto: "CustomerFilterDto"
+          response: "PaginatedResponse<CustomerResponseDto>"
+          response_status: 200
+          permissions: ["crm.customer.read"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+            - param: "sort"
+              value: "createdAt_desc"
+          filters:
+            - "status"
+            - "segment"
+            - "tier"
+            - "assignedTo"
+            - "tag"
+            - "search"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter cliente"
+          operation_id: "getCustomer"
+          response: "CustomerDetailResponseDto"
+          response_status: 200
+          permissions: ["crm.customer.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar cliente"
+          operation_id: "updateCustomer"
+          dto: "UpdateCustomerDto"
+          response: "CustomerResponseDto"
+          response_status: 200
+          permissions: ["crm.customer.update"]
+          audit: "CUSTOMER_UPDATED"
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Soft delete cliente"
+          operation_id: "deleteCustomer"
+          response_status: 204
+          permissions: ["crm.customer.delete"]
+          audit: "CUSTOMER_DELETED"
+
+        - method: "POST"
+          path: "/:id/change-tier"
+          summary: "Alterar tier do cliente"
+          operation_id: "changeCustomerTier"
+          dto: "ChangeTierDto"
+          response: "CustomerResponseDto"
+          response_status: 200
+          permissions: ["crm.customer.manage"]
+          audit: "CUSTOMER_TIER_CHANGED"
+
+        - method: "POST"
+          path: "/:id/assign"
+          summary: "Atribuir account manager"
+          operation_id: "assignCustomerOwner"
+          dto: "AssignOwnerDto"
+          response: "CustomerResponseDto"
+          response_status: 200
+          permissions: ["crm.customer.update"]
+
+    - controller: "PipelinesController"
+      prefix: "/api/v1/crm/pipelines"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar pipeline"
+          operation_id: "createPipeline"
+          dto: "CreatePipelineDto"
+          response: "PipelineResponseDto"
+          response_status: 201
+          permissions: ["crm.pipeline.manage"]
+          audit: "PIPELINE_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar pipelines"
+          operation_id: "listPipelines"
+          response: "PipelineResponseDto[]"
+          response_status: 200
+          permissions: ["crm.pipeline.read"]
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter pipeline com estágios"
+          operation_id: "getPipeline"
+          response: "PipelineDetailResponseDto"
+          response_status: 200
+          permissions: ["crm.pipeline.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar pipeline"
+          operation_id: "updatePipeline"
+          dto: "UpdatePipelineDto"
+          response: "PipelineResponseDto"
+          response_status: 200
+          permissions: ["crm.pipeline.manage"]
+          audit: "PIPELINE_UPDATED"
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Remover pipeline"
+          operation_id: "deletePipeline"
+          response_status: 204
+          permissions: ["crm.pipeline.manage"]
+          audit: "PIPELINE_DELETED"
+
+    - controller: "OpportunitiesController"
+      prefix: "/api/v1/crm/opportunities"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar oportunidade"
+          operation_id: "createOpportunity"
+          dto: "CreateOpportunityDto"
+          response: "OpportunityResponseDto"
+          response_status: 201
+          permissions: ["crm.opportunity.create"]
+          audit: "OPPORTUNITY_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar oportunidades"
+          operation_id: "listOpportunities"
+          dto: "OpportunityFilterDto"
+          response: "PaginatedResponse<OpportunityResponseDto>"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+            - param: "sort"
+              value: "expectedCloseDate_asc"
+          filters:
+            - "status"            # OPEN / WON / LOST
+            - "pipelineId"
+            - "stage"
+            - "customerId"
+            - "leadId"
+            - "assignedTo"
+            - "tag"
+            - "estimatedValue_min"
+            - "expectedCloseDate_from"
+            - "expectedCloseDate_to"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter oportunidade"
+          operation_id: "getOpportunity"
+          response: "OpportunityDetailResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar oportunidade"
+          operation_id: "updateOpportunity"
+          dto: "UpdateOpportunityDto"
+          response: "OpportunityResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.update"]
+          audit: "OPPORTUNITY_UPDATED"
+
+        - method: "POST"
+          path: "/:id/move-stage"
+          summary: "Avançar/regredir estágio"
+          operation_id: "moveStage"
+          dto: "MoveStageDto"
+          response: "OpportunityResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.update"]
+          audit: "OPPORTUNITY_STAGE_CHANGED"
+
+        - method: "POST"
+          path: "/:id/win"
+          summary: "Marcar como ganha"
+          operation_id: "winOpportunity"
+          dto: "WinOpportunityDto"
+          response: "OpportunityResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.update"]
+          audit: "OPPORTUNITY_WON"
+
+        - method: "POST"
+          path: "/:id/lose"
+          summary: "Marcar como perdida"
+          operation_id: "loseOpportunity"
+          dto: "LoseOpportunityDto"
+          response: "OpportunityResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.update"]
+          audit: "OPPORTUNITY_LOST"
+
+        - method: "POST"
+          path: "/:id/assign"
+          summary: "Atribuir responsável"
+          operation_id: "assignOpportunityOwner"
+          dto: "AssignOwnerDto"
+          response: "OpportunityResponseDto"
+          response_status: 200
+          permissions: ["crm.opportunity.update"]
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Soft delete oportunidade"
+          operation_id: "deleteOpportunity"
+          response_status: 204
+          permissions: ["crm.opportunity.delete"]
+          audit: "OPPORTUNITY_DELETED"
+
+    - controller: "ActivitiesController"
+      prefix: "/api/v1/crm/activities"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Registrar atividade"
+          operation_id: "createActivity"
+          dto: "CreateActivityDto"
+          response: "ActivityResponseDto"
+          response_status: 201
+          permissions: ["crm.activity.create"]
+          audit: "ACTIVITY_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar atividades"
+          operation_id: "listActivities"
+          dto: "ActivityFilterDto"
+          response: "ActivityResponseDto[]"
+          response_status: 200
+          permissions: ["crm.activity.read"]
+          filters:
+            - "leadId"
+            - "customerId"
+            - "opportunityId"
+            - "type"
+            - "createdBy"
+            - "date_from"
+            - "date_to"
+          defaults:
+            - param: "limit"
+              value: 100
+            - param: "sort"
+              value: "occurredAt_desc"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter atividade"
+          operation_id: "getActivity"
+          response: "ActivityResponseDto"
+          response_status: 200
+          permissions: ["crm.activity.read"]
+
+    - controller: "TasksController"
+      prefix: "/api/v1/crm/tasks"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"
+          path: "/"
+          summary: "Criar tarefa"
+          operation_id: "createTask"
+          dto: "CreateTaskDto"
+          response: "TaskResponseDto"
+          response_status: 201
+          permissions: ["crm.task.create"]
+          audit: "TASK_CREATED"
+
+        - method: "GET"
+          path: "/"
+          summary: "Listar tarefas"
+          operation_id: "listTasks"
+          dto: "TaskFilterDto"
+          response: "PaginatedResponse<TaskResponseDto>"
+          response_status: 200
+          permissions: ["crm.task.read"]
+          pagination: true
+          defaults:
+            - param: "limit"
+              value: 50
+            - param: "sort"
+              value: "dueDate_asc"
+          filters:
+            - "status"
+            - "priority"
+            - "assignedTo"
+            - "leadId"
+            - "customerId"
+            - "opportunityId"
+            - "dueDate_from"
+            - "dueDate_to"
+            - "tag"
+
+        - method: "GET"
+          path: "/my"
+          summary: "Minhas tarefas"
+          operation_id: "listMyTasks"
+          dto: "TaskFilterDto"
+          response: "PaginatedResponse<TaskResponseDto>"
+          response_status: 200
+          description: "Lista tarefas do usuário autenticado"
+
+        - method: "GET"
+          path: "/:id"
+          summary: "Obter tarefa"
+          operation_id: "getTask"
+          response: "TaskResponseDto"
+          response_status: 200
+          permissions: ["crm.task.read"]
+
+        - method: "PATCH"
+          path: "/:id"
+          summary: "Atualizar tarefa"
+          operation_id: "updateTask"
+          dto: "UpdateTaskDto"
+          response: "TaskResponseDto"
+          response_status: 200
+          permissions: ["crm.task.update"]
+          audit: "TASK_UPDATED"
+
+        - method: "POST"
+          path: "/:id/complete"
+          summary: "Concluir tarefa"
+          operation_id: "completeTask"
+          response_status: 204
+          permissions: ["crm.task.update"]
+          audit: "TASK_COMPLETED"
+
+        - method: "POST"
+          path: "/:id/cancel"
+          summary: "Cancelar tarefa"
+          operation_id: "cancelTask"
+          dto: "CancelTaskDto"
+          response_status: 204
+          permissions: ["crm.task.update"]
+          audit: "TASK_CANCELLED"
+
+        - method: "DELETE"
+          path: "/:id"
+          summary: "Deletar tarefa"
+          operation_id: "deleteTask"
+          response_status: 204
+          permissions: ["crm.task.delete"]
+
+    - controller: "TimelineController"
+      prefix: "/api/v1/crm/timeline"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/lead/:leadId"
+          summary: "Timeline do lead"
+          operation_id: "getLeadTimeline"
+          response: "TimelineEntryDto[]"
+          response_status: 200
+          permissions: ["crm.lead.read"]
+          defaults:
+            - param: "limit"
+              value: 50
+
+        - method: "GET"
+          path: "/customer/:customerId"
+          summary: "Timeline do cliente"
+          operation_id: "getCustomerTimeline"
+          response: "TimelineEntryDto[]"
+          response_status: 200
+          permissions: ["crm.customer.read"]
+
+        - method: "GET"
+          path: "/opportunity/:opportunityId"
+          summary: "Timeline da oportunidade"
+          operation_id: "getOpportunityTimeline"
+          response: "TimelineEntryDto[]"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+
+    - controller: "CrmDashboardController"
+      prefix: "/api/v1/crm/dashboard"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "GET"
+          path: "/summary"
+          summary: "Resumo do CRM"
+          operation_id: "getCrmSummary"
+          response: "CrmSummaryDto"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+          cache:
+            ttl: 60
+            key_pattern: "{tenantId}:crm:dashboard:summary"
+
+        - method: "GET"
+          path: "/pipeline/:pipelineId"
+          summary: "Visão do pipeline (kanban)"
+          operation_id: "getPipelineKanban"
+          response: "PipelineKanbanDto"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+          cache:
+            ttl: 30
+            key_pattern: "{tenantId}:crm:dashboard:kanban:{pipelineId}"
+
+        - method: "GET"
+          path: "/forecast"
+          summary: "Previsão de receita"
+          operation_id: "getRevenueForecast"
+          response: "RevenueForecastDto"
+          response_status: 200
+          permissions: ["crm.opportunity.read"]
+          cache:
+            ttl: 300
+            key_pattern: "{tenantId}:crm:dashboard:forecast"
+
+  # ── Permissões ───────────────────────────────────────────────────────────
+
+  permissions:
+    roles:
+      - id: "TENANT_ADMIN"
+        policies:
+          - "crm.*"
+
+      - id: "TENANT_MANAGER"
+        inherits: ["TENANT_VIEWER"]
+        policies:
+          - "crm.lead.create"
+          - "crm.lead.update"
+          - "crm.lead.convert"
+          - "crm.lead.delete"
+          - "crm.customer.create"
+          - "crm.customer.update"
+          - "crm.opportunity.create"
+          - "crm.opportunity.update"
+          - "crm.pipeline.manage"
+
+      - id: "TENANT_VIEWER"
+        policies:
+          - "crm.*.read"
+
+    permission_catalog:
+      - code: "crm.lead.create"
+        description: "Criar leads"
+      - code: "crm.lead.read"
+        description: "Consultar leads"
+      - code: "crm.lead.update"
+        description: "Atualizar leads"
+      - code: "crm.lead.delete"
+        description: "Excluir leads"
+      - code: "crm.lead.convert"
+        description: "Converter lead em cliente"
+      - code: "crm.lead.manage"
+        description: "Mesclar leads e administrar"
+      - code: "crm.customer.create"
+        description: "Criar clientes"
+      - code: "crm.customer.read"
+        description: "Consultar clientes"
+      - code: "crm.customer.update"
+        description: "Atualizar clientes"
+      - code: "crm.customer.delete"
+        description: "Excluir clientes"
+      - code: "crm.customer.manage"
+        description: "Alterar tier e administrar"
+      - code: "crm.opportunity.create"
+        description: "Criar oportunidades"
+      - code: "crm.opportunity.read"
+        description: "Consultar oportunidades"
+      - code: "crm.opportunity.update"
+        description: "Atualizar, mover estágio, ganhar/perder"
+      - code: "crm.opportunity.delete"
+        description: "Excluir oportunidades"
+      - code: "crm.pipeline.read"
+        description: "Consultar pipelines"
+      - code: "crm.pipeline.manage"
+        description: "CRUD de pipelines"
+      - code: "crm.activity.create"
+        description: "Registrar atividades"
+      - code: "crm.activity.read"
+        description: "Consultar atividades"
+      - code: "crm.task.create"
+        description: "Criar tarefas"
+      - code: "crm.task.read"
+        description: "Consultar tarefas"
+      - code: "crm.task.update"
+        description: "Atualizar, concluir e cancelar tarefas"
+      - code: "crm.task.delete"
+        description: "Excluir tarefas"
+
+    resource_based:
+      - action: "crm.lead.convert"
+        constraint: "lead.status == QUALIFIED"
+      - action: "crm.opportunity.update"
+        constraint: "opportunity.status == 'OPEN'"
+      - action: "crm.customer.delete"
+        constraint: "customer.status != 'ACTIVE' OR hasPermission('crm.customer.manage')"
+
+  # ── Observabilidade ───────────────────────────────────────────────────────
+
+  observability:
+    logging:
+      level: "info"
+      format: "json"
+      include:
+        - "tenantId"
+        - "userId"
+        - "entityType"
+        - "entityId"
+        - "operation"
+        - "duration_ms"
+        - "eventType"
+      sensitive_fields: ["taxId", "email", "phone", "mobile"]
+
+    metrics:
+      - name: "bidflow_crm_leads_total"
+        type: "counter"
+        description: "Total de leads criados"
+        labels: ["tenant_id", "source", "status"]
+
+      - name: "bidflow_crm_leads_conversion_rate"
+        type: "gauge"
+        description: "Taxa de conversão lead → customer"
+        labels: ["tenant_id"]
+
+      - name: "bidflow_crm_opportunities_total"
+        type: "counter"
+        description: "Oportunidades criadas"
+        labels: ["tenant_id", "pipeline_id", "status"]
+
+      - name: "bidflow_crm_opportunities_won_value"
+        type: "counter"
+        description: "Valor total de oportunidades ganhas"
+        labels: ["tenant_id", "currency"]
+
+      - name: "bidflow_crm_pipeline_value"
+        type: "gauge"
+        description: "Valor total do pipeline (OPEN)"
+        labels: ["tenant_id", "pipeline_id"]
+
+      - name: "bidflow_crm_tasks_overdue"
+        type: "gauge"
+        description: "Tarefas em atraso"
+        labels: ["tenant_id", "priority"]
+
+    tracing:
+      enabled: true
+      sampling_rate: 0.5
+      attributes:
+        - "tenant.id"
+        - "crm.entity_type"
+        - "crm.entity_id"
+        - "crm.operation"
+
+    alerts:
+      - name: "CrmHighConversionDrop"
+        condition: "lead_conversion_rate < 10%"
+        window: "7d"
+        severity: "warning"
+
+      - name: "CrmManyOverdueTasks"
+        condition: "tasks_overdue > 50"
+        window: "1h"
+        severity: "warning"
+
+  # ── Multi-tenant ─────────────────────────────────────────────────────────
+
+  multi_tenant:
+    isolation: "schema-per-tenant"
+    tenant_column: "tenant_id"
+    filter_mode: "automatic"
+    cache:
+      key_prefix: "{tenantId}:crm:"
+    queues:
+      routing_key_template: "{tenantId}.crm.{eventType}"
+
+  # ── AI Hooks ──────────────────────────────────────────────────────────────
+
+  ai_hooks:
+    inference_points:
+      - id: "ai-lead-scoring"
+        trigger: "LeadCaptured"
+        description: "Calcula score preditivo do lead (0-100)"
+        service: "analytics"
+        model: "lead-scorer-v2"
+        mode: "async"
+        timeout: "5s"
+        fallback:
+          action: "set_score_0"
+          reason: "AI unavailable"
+
+      - id: "ai-opportunity-prediction"
+        trigger: "OpportunityStageChanged"
+        description: "Atualiza probabilidade de fechamento com base em dados históricos"
+        service: "analytics"
+        model: "win-probability-v1"
+        mode: "async"
+
+      - id: "ai-churn-detection"
+        trigger: "CustomerActivityLow"
+        description: "Detecta risco de churn baseado em queda de atividade"
+        service: "analytics"
+        model: "churn-detector-v1"
+        mode: "async"
+
+  # ── Documentação ─────────────────────────────────────────────────────────
+
+  documentation:
+    user_guide: "/docs/crm/user-guide.md"
+    technical_docs: "/docs/crm/technical-guide.md"
+    openapi: ".specify/specs/crm/crm-openapi.yml"
+
+  # ── Exemplos de Uso ──────────────────────────────────────────────────────
+
+  examples:
+    - id: "ex-create-lead"
+      description: "Criar lead via API"
+      request:
+        endpoint: "POST /api/v1/crm/leads"
+        body:
+          name: "Carlos Almeida"
+          email: "carlos@empresaparceira.com.br"
+          phone: "+5511999998888"
+          company: "Empresa Parceira Ltda"
+          position: "Diretor de Compras"
+          source: "INDICATION"
+          tags: ["hot", "enterprise"]
+          notes: "Indicação do cliente João Silva"
+      response:
+        status: 201
+        body:
+          id: "990e8400-e29b-41d4-a716-446655440000"
+          name: "Carlos Almeida"
+          status: "NEW"
+          score: 65
+          source: "INDICATION"
+          assignedTo: null
+          createdAt: "2026-05-15T10:00:00Z"
+
+    - id: "ex-convert-lead"
+      description: "Converter lead qualificado em cliente"
+      request:
+        endpoint: "POST /api/v1/crm/leads/:id/convert"
+        body:
+          legalName: "Empresa Parceira Ltda"
+          taxId: "12.345.678/0001-90"
+          segment: "PRIVATE"
+          tier: "SILVER"
+      response:
+        status: 201
+        body:
+          customerId: "aa0e8400-e29b-41d4-a716-446655440000"
+          customerName: "Empresa Parceira Ltda"
+          tier: "SILVER"
+          leadId: "990e8400-e29b-41d4-a716-446655440000"
+          message: "Lead convertido com sucesso. Fornecedor criado no ERP."
+
+    - id: "ex-create-opportunity"
+      description: "Criar oportunidade e mover no pipeline"
+      request:
+        endpoint: "POST /api/v1/crm/opportunities"
+        body:
+          customerId: "aa0e8400-e29b-41d4-a716-446655440000"
+          pipelineId: "bb0e8400-e29b-41d4-a716-446655440000"
+          title: "Fornecimento de Equipamentos de TI"
+          estimatedValue: 750000.00
+          stage: "qualification"
+          expectedCloseDate: "2026-07-30"
+          products:
+            - name: "Servidores"
+              quantity: 15
+              estimatedValue: 450000
+            - name: "Storage"
+              quantity: 3
+              estimatedValue: 300000
+      response:
+        status: 201
+        body:
+          id: "cc0e8400-e29b-41d4-a716-446655440000"
+          title: "Fornecimento de Equipamentos de TI"
+          status: "OPEN"
+          stage: "qualification"
+          probability: 25
+          estimatedValue: 750000.00
+
+  # ── Testes ────────────────────────────────────────────────────────────────
+
+  tests:
+    unit:
+      required: true
+      coverage_minimum: 85
+      files:
+        - "src/crm/domain/**/*.spec.ts"
+        - "src/crm/application/**/*.spec.ts"
+
+    integration:
+      required: true
+      coverage_minimum: 80
+      files:
+        - "test/integration/crm/lead-flow.e2e-spec.ts"
+        - "test/integration/crm/pipeline.e2e-spec.ts"
+        - "test/integration/crm/opportunity.e2e-spec.ts"
+        - "test/integration/crm/timeline.e2e-spec.ts"
+
+    e2e:
+      required: true
+      files:
+        - "test/e2e/crm/lead-to-customer.e2e-spec.ts"
+        - "test/e2e/crm/pipeline-kanban.e2e-spec.ts"
+        - "test/e2e/crm/task-lifecycle.e2e-spec.ts"
+
+    scenarios:
+      - id: "t-lead-to-customer"
+        description: "Fluxo completo: lead → qualification → conversion → customer"
+        type: "functional"
+        critical: true
+
+      - id: "t-opportunity-pipeline"
+        description: "Oportunidade avança por todos os estágios do pipeline até WON"
+        type: "functional"
+
+      - id: "t-timeline-immutable"
+        description: "Entradas de timeline não podem ser alteradas ou deletadas"
+        type: "security"
+
+      - id: "t-tenant-isolation"
+        description: "CRM data de tenant A não visível para tenant B"
+        type: "security"
+        critical: true
+
+      - id: "t-soft-delete"
+        description: "Registros deletados não aparecem nas queries mas são recuperáveis"
+        type: "functional"
+
+  # ── Checklist de Implementação ────────────────────────────────────────────
+
+  checklist:
+    pre_implementation:
+      - "[ ] Spec revisada pelo Architecture Board"
+      - "[ ] OpenAPI contract do módulo CRM gerado"
+      - "[ ] Eventos e payloads acordados com Bidding, ERP e IA"
+
+    implementation:
+      - "[ ] Aggregate: LeadEntity (com state machine de 6 status)"
+      - "[ ] Aggregate: CustomerEntity (com segment, tier, soft delete)"
+      - "[ ] Aggregate: PipelineEntity (com stages configuráveis)"
+      - "[ ] Aggregate: OpportunityEntity (com state machine WON/LOST)"
+      - "[ ] Aggregate: TaskEntity (com prioridade, owner, due date)"
+      - "[ ] Entity: Activity (append-only imutável)"
+      - "[ ] Entity: TimelineEntry (append-only, feed consolidado)"
+      - "[ ] Repository interfaces + Prisma implementations"
+      - "[ ] Commands Handlers para cada fluxo"
+      - "[ ] Controllers: Leads, Customers, Pipelines, Opportunities, Activities, Tasks, Timeline, Dashboard"
+      - "[ ] DTOs de criação, filtro e resposta"
+      - "[ ] Soft delete em leads, customers, opportunities"
+      - "[ ] Audit logging em toda mutation"
+      - "[ ] Timeline automática (actvities + status changes + stage changes)"
+      - "[ ] Endpoint de kanban (agrupado por pipeline.stage)"
+
+    post_implementation:
+      - "[ ] Testes unitários >= 85%"
+      - "[ ] Testes de integração dos fluxos principais"
+      - "[ ] Testes de tenant isolation e soft delete"
+      - "[ ] Documentação OpenAPI atualizada"
+      - "[ ] Dashboards Grafana com métricas de CRM"

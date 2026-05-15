@@ -1,0 +1,207 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: Module / Bounded Context
+# =============================================================================
+# Template padronizado para especificar um módulo/bounded context completo.
+# Schema version: 1.0 | Spec-Driven Development
+# =============================================================================
+
+spec:
+  # ── Metadata ──────────────────────────────────────────────────────────────
+  id: "bidflow-{context}-{nnn}"
+  title: "[Módulo: Nome do Bounded Context]"
+  version: "1.0.0"
+  status: draft                                        # draft | review | approved | deprecated
+  context: "[context-name]"
+  author: "[Architecture Board | Team Name]"
+  created: "[YYYY-MM-DD]"
+  updated: "[YYYY-MM-DD]"
+
+  tags:
+    - "[context]"
+    - "[core-domain | supporting | generic]"
+    - "multi-tenant"
+    - "event-driven"
+
+  depends_on:
+    specs:
+      - "bidflow-auth-001"
+      - "bidflow-tenant-001"
+      - "bidflow-wf-001"
+    services:
+      - "postgres"
+      - "redis"
+      - "rabbitmq"
+    apis: []
+
+  # ── Overview ──────────────────────────────────────────────────────────────
+  overview: |
+    ## Descrição
+    [Descrição concisa do bounded context]
+
+    ## Objetivos de Negócio
+    1. [Objetivo mensurável 1]
+    2. [Objetivo mensurável 2]
+    3. [Objetivo mensurável 3]
+
+    ## Critérios de Sucesso
+    - [Métrica 1]
+    - [Métrica 2]
+
+  # ── Architecture ─────────────────────────────────────────────────────────
+  architecture:
+    type: "clean-architecture"
+    layers:
+      - domain       # Entities, VOs, Services, Repository Interfaces
+      - application  # Commands, Queries, Handlers, DTOs
+      - infrastructure # Persistence, Controllers, Event Publishers
+    patterns:
+      - "DDD"
+      - "CQRS"
+      - "Event-Driven"
+      - "Repository Pattern"
+      - "Ports & Adapters"
+
+  # ── Modules / Entities ───────────────────────────────────────────────────
+  modules:
+
+    - id: "{module-id}"
+      name: "[Nome do Módulo]"
+      description: "[Descrição do propósito]"
+
+      entities:
+        # ─ Aggregate Root ──────────────────────────────────────────────────
+        - id: "[EntityName]"
+          name: "[Nome da Entidade]"
+          description: "[Descrição detalhada]"
+          aggregate_root: true
+          persistence:
+            table: "[snake_case_table_name]"
+            indexes:
+              - fields: ["tenant_id", "status"]
+              - fields: ["tenant_id", "created_at"]
+            soft_delete: false
+
+          attributes:
+            - name: "id"           type: "uuid"         required: true
+            - name: "tenantId"     type: "uuid"         required: true  immutable: true
+            - name: "status"       type: "enum"         required: true  default: "PENDING"
+
+          invariants:
+            - "[regra de consistência 1]"
+            - "[regra de consistência 2]"
+
+          state_machine:
+            initial: "PENDING"
+            states:
+              - id: "PENDING"   allowed_transitions: ["ACTIVE", "CANCELLED"]
+              - id: "ACTIVE"    allowed_transitions: ["COMPLETED", "CANCELLED"]
+              - id: "COMPLETED" final: true
+              - id: "CANCELLED" final: true
+
+          relationships:
+            - type: "has_many"  entity: "[ChildEntity]"   via: "parentId"
+            - type: "belongs_to" entity: "[ParentEntity]" via: "parentId"
+
+        # ─ Non-Aggregate Entity ────────────────────────────────────────────
+        - id: "[ChildEntity]"
+          name: "[Nome]"
+          description: "[Descrição]"
+          aggregate_root: false
+          persistence:
+            table: "[table_name]"
+            indexes:
+              - fields: ["parent_id", "number"]
+                unique: true
+
+      value_objects:
+        - id: "[ValueObjectName]"
+          description: "[Descrição]"
+          attributes:
+            - name: "value"  type: "string"   required: true  max_length: 100
+
+  # ── Business Rules ───────────────────────────────────────────────────────
+  business_rules:
+    - id: "{CTX}-BR-{NNN}"
+      title: "[Título da regra]"
+      description: "[Descrição detalhada]"
+      scope: "[EntityName.field]"
+      type: "hard"                                    # hard | soft | validation
+      error_code: "ERROR_CODE"
+
+  # ── Workflows ────────────────────────────────────────────────────────────
+  workflows:
+    - id: "wf-{context}-{flow}"
+      name: "[Nome do Workflow]"
+      description: "[Descrição]"
+      workflow_engine: true                            # Se integrado ao WF Engine
+
+      stages:
+        - id: "[stage]"     label: "[Label]"     initial: true
+        - id: "[stage]"     label: "[Label]"     approval: true
+
+  # ── Events ───────────────────────────────────────────────────────────────
+  events:
+    - id: "evt-{context}-{event}"
+      name: "[EventName]"
+      version: "v1"
+      type: "com.bidflow.{context}.{entity}.{action}.v1"
+      routing_key: "{tenantId}.{context}.{action}"
+
+      payload:
+        eventId:    { type: "uuid", required: true }
+        aggregateId: { type: "uuid", required: true }
+        tenantId:   { type: "uuid", required: true }
+        timestamp:  { type: "datetime", required: true }
+        data:
+          type: "object"
+          properties:
+            entityId: { type: "uuid" }
+
+      consumers:
+        - service: "[service]"  handler: "[handler]"  async: true
+
+  # ── APIs ─────────────────────────────────────────────────────────────────
+  apis:
+    - controller: "[EntityName]Controller"
+      prefix: "/api/v1/{context}/{entities}"
+      auth: "required"
+      tenant_isolation: true
+
+      endpoints:
+        - method: "POST"      path: "/"              summary: "Criar"             response_status: 201
+        - method: "GET"       path: "/"              summary: "Listar"            pagination: true
+        - method: "GET"       path: "/:id"            summary: "Obter"
+        - method: "PATCH"     path: "/:id"            summary: "Atualizar"
+        - method: "DELETE"    path: "/:id"            summary: "Remover"          response_status: 204
+
+  # ── Permissions ──────────────────────────────────────────────────────────
+  permissions:
+    roles:
+      - id: "TENANT_ADMIN"    policies: ["{context}.*"]
+      - id: "TENANT_MANAGER"  policies: ["{context}.create", "{context}.read", "{context}.update"]
+      - id: "TENANT_VIEWER"   policies: ["{context}.read"]
+
+    permission_catalog:
+      - code: "{context}.create"
+
+  # ── Multi-tenant ─────────────────────────────────────────────────────────
+  multi_tenant:
+    isolation: "schema-per-tenant"
+    tenant_column: "tenant_id"
+
+  # ── Observability ────────────────────────────────────────────────────────
+  observability:
+    logging:
+      level: "info"
+      include: ["tenantId", "entityId", "status"]
+      sensitive_fields: []
+
+    metrics:
+      - name: "bidflow_{context}_total"
+        type: "counter"
+        labels: ["tenant_id", "status"]
+
+    alerts:
+      - name: "[Context]HighErrorRate"
+        condition: "error_rate > 5%"
+        severity: "warning"

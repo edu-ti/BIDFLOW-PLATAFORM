@@ -1,0 +1,82 @@
+# =============================================================================
+# BIDFLOW PLATFORM — Spec Template: Workflow Definition
+# =============================================================================
+# Template para especificar workflows (integrados ou não ao Workflow Engine).
+# Schema version: 1.0
+# =============================================================================
+
+workflow:
+  # ── Metadata ──
+  id: "wf-{context}-{name}"
+  name: "[Nome do Workflow]"
+  description: "[Descrição do fluxo]"
+  version: "1.0.0"
+  engine_integrated: true               # Se usa o Workflow Engine genérico
+  engine_definition_slug: "wf-{slug}"  # Slug no Workflow Engine (se engine_integrated)
+
+  # ── Trigger ──
+  trigger:
+    event: "[EventType]"
+    type: "event-driven | manual | scheduled"
+    schedule: null                      # Cron expression (se scheduled)
+
+  # ── Stages ──
+  stages:
+    - id: "[stage_id]"
+      label: "[Nome Exibível]"
+      description: "[Descrição]"
+      type: "INITIAL | STANDARD | APPROVAL | REVIEW | FINISH | CANCELLED"
+      initial: false
+      final: false
+
+      # Approval config (se type = APPROVAL)
+      approval:
+        mode: "ANY | ALL | SEQUENTIAL"
+        required_approvals: 1
+        allow_self_approval: false
+        deadline_hours: 48
+
+      # Assignment config
+      assignment:
+        mode: "ROLE | USER | MANAGER | QUEUE"
+        role_slug: null
+        notify_on_enter: false
+        notify_on_exit: false
+
+      # Deadlines
+      deadline_hours: null
+      allow_rejection: true
+      rejection_target: "[stage_id]"
+
+  # ── Transitions ──
+  transitions:
+    - id: "[transition_id]"
+      name: "[Nome da Ação]"
+      from: "[stage_id]"
+      to: "[stage_id]"
+      conditions:
+        requires_comment: false
+        requires_attachment: false
+        required_role: null
+      automatic: false
+      auto_trigger_event: null
+
+  # ── Business Rules ──
+  rules:
+    - "Regra 1: descrição da invariante"
+    - "Regra 2: descrição da invariante"
+
+  # ── Integration ──
+  integration:
+    entity_type: "[context].[entity]"  # Ex: "tender.tender"
+    status_mapping:
+      workflow_stage: "entity_status"
+      "stage_1": "STATUS_A"
+      "stage_2": "STATUS_B"
+
+    events_produced:
+      - "com.bidflow.workflow.stage.changed.v1"
+      - "com.bidflow.workflow.instance.completed.v1"
+
+    events_consumed:
+      - "com.bidflow.{context}.{action}.v1"

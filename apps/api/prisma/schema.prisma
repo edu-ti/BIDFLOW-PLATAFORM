@@ -8,16 +8,19 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  role      UserRole @default(USER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String   @id @default(uuid()) @map("id")
+  tenantId  String   @map("tenant_id")
+  email     String   @map("email")
+  name      String   @map("name") @db.VarChar(255)
+  role      UserRole @default(USER) @map("role")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   bids      Bid[]
-  auctions Auction[]
+  auctions  Auction[]
 
+  @@unique([tenantId, email])
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -28,22 +31,25 @@ enum UserRole {
 }
 
 model Auction {
-  id          String   @id @default(uuid())
-  title       String
-  description String
-  startPrice  Decimal  @db.Decimal(10, 2)
-  currentPrice Decimal @db.Decimal(10, 2)
-  status      AuctionStatus @default(PENDING)
-  startDate   DateTime
-  endDate     DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String        @id @default(uuid()) @map("id")
+  tenantId     String        @map("tenant_id")
+  title        String        @map("title") @db.VarChar(255)
+  description  String        @map("description") @db.Text
+  startPrice   Decimal       @map("start_price") @db.Decimal(10, 2)
+  currentPrice Decimal       @map("current_price") @db.Decimal(10, 2)
+  status       AuctionStatus @default(PENDING) @map("status")
+  startDate    DateTime      @map("start_date")
+  endDate      DateTime      @map("end_date")
+  userId       String        @map("user_id")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
 
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user User  @relation(fields: [userId], references: [id])
+  bids Bid[]
 
-  bids        Bid[]
-
+  @@index([tenantId, status])
+  @@index([tenantId, userId])
+  @@index([tenantId, createdAt])
   @@map("auctions")
 }
 
@@ -55,16 +61,840 @@ enum AuctionStatus {
 }
 
 model Bid {
-  id        String   @id @default(uuid())
-  amount    Decimal  @db.Decimal(10, 2)
-  createdAt DateTime @default(now())
+  id        String   @id @default(uuid()) @map("id")
+  tenantId  String   @map("tenant_id")
+  amount    Decimal  @map("amount") @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
 
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  userId    String  @map("user_id")
+  auctionId String  @map("auction_id")
 
-  auctionId String
-  auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
-  @@index([auctionId, createdAt])
+  @@index([tenantId, auctionId, createdAt])
+  @@index([tenantId, userId])
   @@map("bids")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — LEAD
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  DISQUALIFIED
+  ARCHIVED
+}
+
+enum LeadSource {
+  WEBSITE
+  LANDING_PAGE
+  REFERRAL
+  IMPORT
+  API
+  SOCIAL_MEDIA
+  EVENT
+  INDICATION
+  MANUAL
+}
+
+model Lead {
+  id                     String     @id @default(uuid()) @map("id")
+  tenantId               String     @map("tenant_id")
+  name                   String     @map("name") @db.VarChar(255)
+  email                  String     @map("email") @db.VarChar(255)
+  phone                  String?    @map("phone") @db.VarChar(30)
+  mobile                 String?    @map("mobile") @db.VarChar(30)
+  company                String?    @map("company") @db.VarChar(255)
+  position               String?    @map("position") @db.VarChar(100)
+  department             String?    @map("department") @db.VarChar(100)
+  status                 LeadStatus @default(NEW) @map("status")
+  source                 LeadSource @default(MANUAL) @map("source")
+  score                  Int        @default(0) @map("score")
+  scoreCriteria          Json?      @map("score_criteria")
+  assignedTo             String?    @map("assigned_to")
+  assignedAt             DateTime?  @map("assigned_at")
+  lastContactedAt        DateTime?  @map("last_contacted_at")
+  lastContactedBy        String?    @map("last_contacted_by")
+  convertedToCustomerId  String?    @map("converted_to_customer_id")
+  convertedAt            DateTime?  @map("converted_at")
+  convertedBy            String?    @map("converted_by")
+  disqualificationReason String?    @map("disqualification_reason") @db.VarChar(500)
+  tags                   Json?      @default("[]") @map("tags")
+  customFields           Json?      @default("{}") @map("custom_fields")
+  notes                  String?    @map("notes") @db.Text
+  deletedAt              DateTime?  @map("deleted_at")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+
+  activities   Activity[]      @relation("LeadActivities")
+  tasks        Task[]          @relation("LeadTasks")
+  timeline     TimelineEntry[] @relation("LeadTimeline")
+  opportunities Opportunity[]  @relation("LeadOpportunities")
+  customer     Customer?       @relation("LeadToCustomer")
+
+  @@index([tenantId, email])
+  @@index([tenantId, status])
+  @@index([tenantId, assignedTo])
+  @@index([tenantId, score])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+  @@map("leads")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — CUSTOMER
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+  ARCHIVED
+}
+
+enum CustomerSegment {
+  PUBLIC
+  PRIVATE
+  GOVERNMENT
+  NGO
+  INDIVIDUAL
+}
+
+enum CustomerTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+model Customer {
+  id               String         @id @default(uuid()) @map("id")
+  tenantId         String         @map("tenant_id")
+  legalName        String         @map("legal_name") @db.VarChar(255)
+  fantasyName      String?        @map("fantasy_name") @db.VarChar(255)
+  taxId            String         @map("tax_id") @db.VarChar(20)
+  email            String         @map("email") @db.VarChar(255)
+  phone            String?        @map("phone") @db.VarChar(30)
+  website          String?        @map("website") @db.VarChar(500)
+  address          Json?          @map("address")
+  status           CustomerStatus @default(ACTIVE) @map("status")
+  segment          CustomerSegment @default(PRIVATE) @map("segment")
+  tier             CustomerTier   @default(BRONZE) @map("tier")
+  tierChangedAt    DateTime?      @map("tier_changed_at")
+  leadId           String?        @map("lead_id") @unique
+  assignedTo       String?        @map("assigned_to")
+  contacts         Json?          @default("[]") @map("contacts")
+  tags             Json?          @default("[]") @map("tags")
+  customFields     Json?          @default("{}") @map("custom_fields")
+  notes            String?        @map("notes") @db.Text
+  lastActivityAt   DateTime?      @map("last_activity_at")
+  lastActivityType String?        @map("last_activity_type") @db.VarChar(50)
+  totalRevenue     Decimal        @default(0) @map("total_revenue") @db.Decimal(14, 2)
+  wonOpportunities Int            @default(0) @map("won_opportunities")
+  deletedAt        DateTime?      @map("deleted_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  lead          Lead?            @relation("LeadToCustomer", fields: [leadId], references: [id])
+  opportunities Opportunity[]    @relation("CustomerOpportunities")
+  activities    Activity[]       @relation("CustomerActivities")
+  tasks         Task[]           @relation("CustomerTasks")
+  timeline      TimelineEntry[]  @relation("CustomerTimeline")
+
+  @@index([tenantId, email])
+  @@index([tenantId, taxId])
+  @@index([tenantId, status])
+  @@index([tenantId, tier])
+  @@index([tenantId, segment])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+  @@map("customers")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — PIPELINE
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Pipeline {
+  id          String   @id @default(uuid()) @map("id")
+  tenantId    String   @map("tenant_id")
+  name        String   @map("name") @db.VarChar(100)
+  slug        String   @map("slug") @db.VarChar(50)
+  description String?  @map("description") @db.VarChar(500)
+  isDefault   Boolean  @default(false) @map("is_default")
+  isActive    Boolean  @default(true) @map("is_active")
+  stages      Json     @map("stages")
+  order       Int      @default(0) @map("order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  opportunities Opportunity[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, isDefault])
+  @@map("pipelines")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — OPPORTUNITY
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum OpportunityStatus {
+  OPEN
+  WON
+  LOST
+  ABANDONED
+}
+
+model Opportunity {
+  id                String            @id @default(uuid()) @map("id")
+  tenantId          String            @map("tenant_id")
+  pipelineId        String            @map("pipeline_id")
+  leadId            String?           @map("lead_id")
+  customerId        String?           @map("customer_id")
+  title             String            @map("title") @db.VarChar(255)
+  description       String?           @map("description") @db.Text
+  status            OpportunityStatus @default(OPEN) @map("status")
+  stage             String            @map("stage") @db.VarChar(50)
+  stageOrder        Int               @map("stage_order")
+  previousStage     String?           @map("previous_stage") @db.VarChar(50)
+  estimatedValue    Decimal           @default(0) @map("estimated_value") @db.Decimal(14, 2)
+  currency          String            @default("BRL") @map("currency") @db.VarChar(3)
+  probability       Int               @default(10) @map("probability")
+  expectedCloseDate DateTime?         @map("expected_close_date")
+  actualCloseDate   DateTime?         @map("actual_close_date")
+  wonValue          Decimal?          @map("won_value") @db.Decimal(14, 2)
+  lostReason        String?           @map("lost_reason") @db.VarChar(500)
+  lostDetails       String?           @map("lost_details") @db.Text
+  lostTo            String?           @map("lost_to") @db.VarChar(255)
+  assignedTo        String?           @map("assigned_to")
+  products          Json?             @default("[]") @map("products")
+  tags              Json?             @default("[]") @map("tags")
+  customFields      Json?             @default("{}") @map("custom_fields")
+  deletedAt         DateTime?         @map("deleted_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  pipeline    Pipeline        @relation(fields: [pipelineId], references: [id])
+  lead        Lead?           @relation("LeadOpportunities", fields: [leadId], references: [id])
+  customer    Customer?       @relation("CustomerOpportunities", fields: [customerId], references: [id])
+  activities  Activity[]      @relation("OpportunityActivities")
+  tasks       Task[]          @relation("OpportunityTasks")
+  timeline    TimelineEntry[] @relation("OpportunityTimeline")
+
+  @@index([tenantId, pipelineId, stage])
+  @@index([tenantId, customerId])
+  @@index([tenantId, leadId])
+  @@index([tenantId, assignedTo])
+  @@index([tenantId, status])
+  @@index([tenantId, expectedCloseDate])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, pipelineId, status, stageOrder])
+  @@index([tenantId, expectedCloseDate, status])
+  @@map("opportunities")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — TASK
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id              String       @id @default(uuid()) @map("id")
+  tenantId        String       @map("tenant_id")
+  title           String       @map("title") @db.VarChar(500)
+  description     String?      @map("description") @db.Text
+  status          TaskStatus   @default(PENDING) @map("status")
+  priority        TaskPriority @default(MEDIUM) @map("priority")
+  dueDate         DateTime?    @map("due_date")
+  completedAt     DateTime?    @map("completed_at")
+  completedBy     String?      @map("completed_by")
+  cancelledAt     DateTime?    @map("cancelled_at")
+  cancelledReason String?      @map("cancelled_reason") @db.VarChar(500)
+  leadId          String?      @map("lead_id")
+  customerId      String?      @map("customer_id")
+  opportunityId   String?      @map("opportunity_id")
+  assignedTo      String       @map("assigned_to")
+  assignedBy      String       @map("assigned_by")
+  isRecurring     Boolean      @default(false) @map("is_recurring")
+  recurrenceRule  String?      @map("recurrence_rule") @db.VarChar(500)
+  reminderAt      DateTime?    @map("reminder_at")
+  reminderSent    Boolean      @default(false) @map("reminder_sent")
+  tags            Json?        @default("[]") @map("tags")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  lead        Lead?        @relation("LeadTasks", fields: [leadId], references: [id])
+  customer    Customer?    @relation("CustomerTasks", fields: [customerId], references: [id])
+  opportunity Opportunity? @relation("OpportunityTasks", fields: [opportunityId], references: [id])
+
+  @@index([tenantId, assignedTo, status])
+  @@index([tenantId, dueDate, status])
+  @@index([tenantId, leadId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, opportunityId])
+  @@index([tenantId, priority, status])
+  @@map("tasks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — ACTIVITY (append-only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  TASK_COMPLETED
+  SYSTEM
+  WHATSAPP
+  VIDEO_CALL
+  SITE_VISIT
+  PROPOSAL_SENT
+  CONTRACT_SIGNED
+}
+
+model Activity {
+  id            String       @id @default(uuid()) @map("id")
+  tenantId      String       @map("tenant_id")
+  type          ActivityType @map("type")
+  subject       String       @map("subject") @db.VarChar(500)
+  description   String?      @map("description") @db.Text
+  leadId        String?      @map("lead_id")
+  customerId    String?      @map("customer_id")
+  opportunityId String?      @map("opportunity_id")
+  occurredAt    DateTime     @default(now()) @map("occurred_at")
+  createdBy     String       @map("created_by")
+  duration      Int?         @map("duration")
+  outcome       String?      @map("outcome") @db.VarChar(500)
+  metadata      Json?        @default("{}") @map("metadata")
+  isPinned      Boolean      @default(false) @map("is_pinned")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  lead        Lead?        @relation("LeadActivities", fields: [leadId], references: [id])
+  customer    Customer?    @relation("CustomerActivities", fields: [customerId], references: [id])
+  opportunity Opportunity? @relation("OpportunityActivities", fields: [opportunityId], references: [id])
+
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, customerId, occurredAt])
+  @@index([tenantId, opportunityId, occurredAt])
+  @@index([tenantId, type])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, createdBy])
+  @@index([tenantId, createdBy, occurredAt])
+  @@index([tenantId, type, createdBy, occurredAt])
+  @@map("activities")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CRM — TIMELINE ENTRY (append-only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TimelineEntryType {
+  ACTIVITY
+  TASK_COMPLETED
+  STAGE_CHANGED
+  STATUS_CHANGED
+  OWNER_CHANGED
+  TIER_CHANGED
+  NOTE_ADDED
+  EMAIL_SENT
+  EMAIL_RECEIVED
+  CALL_LOGGED
+  MEETING_LOGGED
+  PROPOSAL_SENT
+  CONTRACT_SIGNED
+  SYSTEM_EVENT
+  SCORE_CHANGED
+  LEAD_CONVERTED
+  OPPORTUNITY_WON
+  OPPORTUNITY_LOST
+}
+
+model TimelineEntry {
+  id            String            @id @default(uuid()) @map("id")
+  tenantId      String            @map("tenant_id")
+  type          TimelineEntryType @map("type")
+  leadId        String?           @map("lead_id")
+  customerId    String?           @map("customer_id")
+  opportunityId String?           @map("opportunity_id")
+  activityId    String?           @map("activity_id")
+  taskId        String?           @map("task_id")
+  title         String            @map("title") @db.VarChar(500)
+  description   String?           @map("description") @db.Text
+  occurredAt    DateTime          @default(now()) @map("occurred_at")
+  createdBy     String?           @map("created_by")
+  metadata      Json?             @default("{}") @map("metadata")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  lead        Lead?        @relation("LeadTimeline", fields: [leadId], references: [id])
+  customer    Customer?    @relation("CustomerTimeline", fields: [customerId], references: [id])
+  opportunity Opportunity? @relation("OpportunityTimeline", fields: [opportunityId], references: [id])
+
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, customerId, occurredAt])
+  @@index([tenantId, opportunityId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+  @@index([occurredAt])
+  @@map("timeline_entries")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — DEFINITION (template)
+// ═══════════════════════════════════════════════════════════════════════════
+// Armazenado no schema public (global). Each tenant has N definitions.
+
+model WorkflowDefinition {
+  id                      String   @id @default(uuid()) @map("id")
+  tenantId                String   @map("tenant_id")
+  name                    String   @map("name") @db.VarChar(150)
+  slug                    String   @map("slug") @db.VarChar(80)
+  description             String?  @map("description") @db.Text
+  entityType              String   @map("entity_type") @db.VarChar(100)
+  icon                    String?  @map("icon") @db.VarChar(50)
+  color                   String?  @map("color") @db.VarChar(7)
+  version                 Int      @default(1) @map("version")
+  isActive                Boolean  @default(true) @map("is_active")
+  isPublished             Boolean  @default(false) @map("is_published")
+  publishedAt             DateTime? @map("published_at")
+  maxConcurrentInstances  Int?     @map("max_concurrent_instances")
+  metadata                Json?    @default("{}") @map("metadata")
+  createdBy               String   @map("created_by")
+  deletedAt               DateTime? @map("deleted_at")
+  deletedBy               String?  @map("deleted_by")
+  deletedReason           String?  @map("deleted_reason") @db.VarChar(500)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  stages       WorkflowStage[]      @relation("DefinitionStages")
+  transitions  WorkflowTransition[] @relation("DefinitionTransitions")
+  instances    WorkflowInstance[]   @relation("DefinitionInstances")
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, entityType])
+  @@index([tenantId, isActive])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+  @@map("workflow_definitions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — STAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum StageType {
+  INITIAL
+  STANDARD
+  APPROVAL
+  REVIEW
+  FINISH
+  CANCELLED
+}
+
+model WorkflowStage {
+  id                     String        @id @default(uuid()) @map("id")
+  workflowDefinitionId   String        @map("workflow_definition_id")
+  slug                   String        @map("slug") @db.VarChar(80)
+  name                   String        @map("name") @db.VarChar(100)
+  description            String?       @map("description") @db.VarChar(500)
+  order                  Int           @map("order")
+  color                  String?       @map("color") @db.VarChar(7)
+  type                   StageType     @default(STANDARD) @map("type")
+  isInitial              Boolean       @default(false) @map("is_initial")
+  isFinal                Boolean       @default(false) @map("is_final")
+  approvalConfig         Json?         @map("approval_config")
+  assignmentConfig       Json?         @map("assignment_config")
+  deadlineHours          Int?          @map("deadline_hours")
+  notifyOnEnter          Boolean       @default(false) @map("notify_on_enter")
+  notifyOnExit           Boolean       @default(false) @map("notify_on_exit")
+  allowRejection         Boolean       @default(true) @map("allow_rejection")
+  rejectionTargetStageId String?       @map("rejection_target_stage_id")
+  metadata               Json?         @default("{}") @map("metadata")
+  deletedAt              DateTime?     @map("deleted_at")
+  deletedBy              String?       @map("deleted_by")
+  deletedReason          String?       @map("deleted_reason") @db.VarChar(500)
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  definition      WorkflowDefinition   @relation("DefinitionStages", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  rejectionTarget WorkflowStage?       @relation("StageRejectionTarget", fields: [rejectionTargetStageId], references: [id])
+  rejectionOf     WorkflowStage[]      @relation("StageRejectionTarget")
+
+  fromTransitions  WorkflowTransition[]  @relation("TransitionFromStage")
+  toTransitions    WorkflowTransition[]  @relation("TransitionToStage")
+
+  instances            WorkflowInstance[]        @relation("InstanceCurrentStage")
+  instanceStageHistory WorkflowInstanceStage[]   @relation("StageToInstanceStage")
+  fromTransitionLogs   WorkflowTransitionLog[]   @relation("TransitionLogFromStage")
+  toTransitionLogs     WorkflowTransitionLog[]   @relation("TransitionLogToStage")
+
+  @@unique([workflowDefinitionId, slug])
+  @@index([workflowDefinitionId, order])
+  @@index([workflowDefinitionId, deletedAt])
+  @@map("workflow_stages")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — TRANSITION
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WorkflowTransition {
+  id                   String   @id @default(uuid()) @map("id")
+  workflowDefinitionId String   @map("workflow_definition_id")
+  slug                 String   @map("slug") @db.VarChar(80)
+  name                 String   @map("name") @db.VarChar(100)
+  fromStageId          String   @map("from_stage_id")
+  toStageId            String   @map("to_stage_id")
+  conditions           Json?    @default("{}") @map("conditions")
+  permissions          Json?    @default("{}") @map("permissions")
+  isAutomatic          Boolean  @default(false) @map("is_automatic")
+  autoTriggerEvent     String?  @map("auto_trigger_event") @db.VarChar(255)
+  order                Int      @default(0) @map("order")
+  metadata             Json?    @default("{}") @map("metadata")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  definition WorkflowDefinition @relation("DefinitionTransitions", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  fromStage  WorkflowStage      @relation("TransitionFromStage", fields: [fromStageId], references: [id], onDelete: Restrict)
+  toStage    WorkflowStage      @relation("TransitionToStage", fields: [toStageId], references: [id], onDelete: Restrict)
+
+  @@unique([workflowDefinitionId, slug])
+  @@index([workflowDefinitionId, fromStageId])
+  @@index([workflowDefinitionId, isAutomatic, autoTriggerEvent])
+  @@map("workflow_transitions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — INSTANCE
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum WorkflowInstanceStatus {
+  ACTIVE
+  COMPLETED
+  REJECTED
+  CANCELLED
+  ARCHIVED
+}
+
+enum InstancePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model WorkflowInstance {
+  id                   String                 @id @default(uuid()) @map("id")
+  tenantId             String                 @map("tenant_id")
+  workflowDefinitionId String                 @map("workflow_definition_id")
+  workflowVersion      Int                    @map("workflow_version")
+  entityType           String                 @map("entity_type") @db.VarChar(100)
+  entityId             String                 @map("entity_id")
+  title                String                 @map("title") @db.VarChar(300)
+  status               WorkflowInstanceStatus @default(ACTIVE) @map("status")
+  currentStageId       String                 @map("current_stage_id")
+  enteredStageAt       DateTime               @default(now()) @map("entered_stage_at")
+  deadlineAt           DateTime?              @map("deadline_at")
+  priority             InstancePriority       @default(NORMAL) @map("priority")
+  assignedTo           String?                @map("assigned_to")
+  assignedRole         String?                @map("assigned_role") @db.VarChar(80)
+  data                 Json?                  @default("{}") @map("data")
+  startedAt            DateTime               @default(now()) @map("started_at")
+  completedAt          DateTime?              @map("completed_at")
+  completedBy          String?                @map("completed_by")
+  totalTransitions     Int                    @default(0) @map("total_transitions")
+  createdBy            String                 @map("created_by")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
+  definition   WorkflowDefinition  @relation("DefinitionInstances", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  currentStage WorkflowStage       @relation("InstanceCurrentStage", fields: [currentStageId], references: [id], onDelete: Restrict)
+
+  stageHistory   WorkflowInstanceStage[]  @relation("InstanceStageHistory")
+  transitionLogs WorkflowTransitionLog[]  @relation("InstanceTransitionLogs")
+  approvals      WorkflowApproval[]       @relation("InstanceApprovals")
+  assignments    WorkflowAssignment[]     @relation("InstanceAssignments")
+  tasks          WorkflowTask[]           @relation("InstanceTasks")
+  timelineEvents WorkflowTimelineEvent[]  @relation("InstanceTimelineEvents")
+
+  @@unique([workflowDefinitionId, entityType, entityId])
+  @@index([tenantId, workflowDefinitionId])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, currentStageId])
+  @@index([tenantId, status])
+  @@index([tenantId, assignedTo])
+  @@index([tenantId, deadlineAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, priority, status])
+  @@index([tenantId, status, deadlineAt])
+  @@index([tenantId, priority, status, deadlineAt])
+  @@index([tenantId, entityType, status])
+  @@map("workflow_instances")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — INSTANCE STAGE HISTORY (append-only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WorkflowInstanceStage {
+  id                 String   @id @default(uuid()) @map("id")
+  tenantId           String   @map("tenant_id")
+  workflowInstanceId String   @map("workflow_instance_id")
+  stageId            String   @map("stage_id")
+  stageSlug          String   @map("stage_slug") @db.VarChar(80)
+  stageName          String   @map("stage_name") @db.VarChar(100)
+  stageOrder         Int      @map("stage_order")
+  stageType          StageType @map("stage_type")
+  enteredAt          DateTime @default(now()) @map("entered_at")
+  exitedAt           DateTime? @map("exited_at")
+  transitionLogId    String?  @map("transition_log_id")
+  durationSeconds    Int?     @map("duration_seconds")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  instance WorkflowInstance @relation("InstanceStageHistory", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+  stage    WorkflowStage    @relation("StageToInstanceStage", fields: [stageId], references: [id], onDelete: Restrict)
+
+  @@index([workflowInstanceId, enteredAt])
+  @@index([tenantId, workflowInstanceId])
+  @@index([tenantId, stageId, enteredAt])
+  @@index([workflowInstanceId, stageId])
+  @@map("workflow_instance_stages")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — TRANSITION LOG (append-only)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WorkflowTransitionLog {
+  id                 String   @id @default(uuid()) @map("id")
+  tenantId           String   @map("tenant_id")
+  workflowInstanceId String   @map("workflow_instance_id")
+  transitionSlug     String   @map("transition_slug") @db.VarChar(80)
+  transitionName     String?  @map("transition_name") @db.VarChar(100)
+  fromStageId        String   @map("from_stage_id")
+  fromStageName      String   @map("from_stage_name") @db.VarChar(100)
+  toStageId          String   @map("to_stage_id")
+  toStageName        String   @map("to_stage_name") @db.VarChar(100)
+  executedBy         String   @map("executed_by")
+  executedAt         DateTime @default(now()) @map("executed_at")
+  isAutomatic        Boolean  @default(false) @map("is_automatic")
+  comment            String?  @map("comment") @db.Text
+  metadata           Json?    @default("{}") @map("metadata")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  instance  WorkflowInstance @relation("InstanceTransitionLogs", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+  fromStage WorkflowStage    @relation("TransitionLogFromStage", fields: [fromStageId], references: [id], onDelete: Restrict)
+  toStage   WorkflowStage    @relation("TransitionLogToStage", fields: [toStageId], references: [id], onDelete: Restrict)
+
+  @@index([workflowInstanceId, executedAt])
+  @@index([tenantId, executedAt])
+  @@index([workflowInstanceId, fromStageId])
+  @@index([tenantId, executedBy, executedAt])
+  @@index([createdAt])
+  @@map("workflow_transition_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — APPROVAL
+// ═══════════════════════════════════════════════════════════════════════════
+// Suporta ANY, ALL e SEQUENTIAL. Deadline calculado com base no stage.
+
+enum ApprovalMode {
+  ANY
+  ALL
+  SEQUENTIAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+  EXPIRED
+}
+
+model WorkflowApproval {
+  id                 String         @id @default(uuid()) @map("id")
+  tenantId           String         @map("tenant_id")
+  workflowInstanceId String         @map("workflow_instance_id")
+  stageId            String         @map("stage_id")
+  status             ApprovalStatus @default(PENDING) @map("status")
+  approvalMode       ApprovalMode   @default(ANY) @map("approval_mode")
+  assignedTo         String         @map("assigned_to")
+  assignedRole       String?        @map("assigned_role") @db.VarChar(80)
+  order              Int            @default(1) @map("order")
+  decidedAt          DateTime?      @map("decided_at")
+  decision           String?        @map("decision") @db.VarChar(20)
+  comment            String?        @map("comment") @db.Text
+  delegatedFrom      String?        @map("delegated_from")
+  delegatedTo        String?        @map("delegated_to")
+  deadlineAt         DateTime?      @map("deadline_at")
+  remindedAt         DateTime?      @map("reminded_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  instance WorkflowInstance @relation("InstanceApprovals", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([workflowInstanceId, stageId])
+  @@index([workflowInstanceId, assignedTo, status])
+  @@index([tenantId, assignedTo, status])
+  @@index([tenantId, deadlineAt])
+  @@index([tenantId, status, deadlineAt])
+  @@index([tenantId, stageId, status])
+  @@map("workflow_approvals")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — ASSIGNMENT
+// ═══════════════════════════════════════════════════════════════════════════
+// Atribuição de responsáveis à instância. Suporta delegação.
+
+enum AssignmentStatus {
+  ACTIVE
+  DELEGATED
+  COMPLETED
+  REVOKED
+}
+
+model WorkflowAssignment {
+  id                 String           @id @default(uuid()) @map("id")
+  tenantId           String           @map("tenant_id")
+  workflowInstanceId String           @map("workflow_instance_id")
+  stageId            String           @map("stage_id")
+  userId             String           @map("user_id")
+  roleSlug           String?          @map("role_slug") @db.VarChar(80)
+  status             AssignmentStatus @default(ACTIVE) @map("status")
+  assignedBy         String           @map("assigned_by")
+  assignedAt         DateTime         @default(now()) @map("assigned_at")
+  completedAt        DateTime?        @map("completed_at")
+  delegatedTo        String?          @map("delegated_to")
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([workflowInstanceId, userId])
+  @@index([tenantId, userId, status])
+  @@index([tenantId, roleSlug])
+  @@map("workflow_assignments")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — TASK
+// ═══════════════════════════════════════════════════════════════════════════
+// Tarefas geradas pelo workflow. isMandatory bloqueia transição.
+
+enum WorkflowTaskType {
+  ACTION
+  UPLOAD
+  FORM
+  VALIDATION
+  NOTIFICATION
+}
+
+enum WorkflowTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+  CANCELLED
+}
+
+model WorkflowTask {
+  id                 String            @id @default(uuid()) @map("id")
+  tenantId           String            @map("tenant_id")
+  workflowInstanceId String            @map("workflow_instance_id")
+  stageId            String            @map("stage_id")
+  title              String            @map("title") @db.VarChar(300)
+  description        String?           @map("description") @db.Text
+  type               WorkflowTaskType  @default(ACTION) @map("type")
+  status             WorkflowTaskStatus @default(PENDING) @map("status")
+  assignedTo         String?           @map("assigned_to")
+  assignedBy         String?           @map("assigned_by")
+  isMandatory        Boolean           @default(true) @map("is_mandatory")
+  dueDate            DateTime?         @map("due_date")
+  completedAt        DateTime?         @map("completed_at")
+  completedBy        String?           @map("completed_by")
+  completedData      Json?             @map("completed_data")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([workflowInstanceId, status])
+  @@index([tenantId, assignedTo, status])
+  @@index([tenantId, stageId])
+  @@index([tenantId, dueDate])
+  @@index([tenantId, status, dueDate])
+  @@map("workflow_tasks")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW ENGINE — TIMELINE EVENT (append-only)
+// ═══════════════════════════════════════════════════════════════════════════
+// Feed cronológico imutável de todos os eventos da instância.
+// Preparado para particionamento por mês (occurred_at).
+
+enum WorkflowTimelineEventType {
+  INSTANCE_CREATED
+  STAGE_ENTERED
+  STAGE_EXITED
+  TRANSITION_EXECUTED
+  APPROVAL_REQUESTED
+  APPROVED
+  REJECTED
+  TASK_CREATED
+  TASK_COMPLETED
+  ASSIGNED
+  REASSIGNED
+  DELEGATED
+  COMMENT_ADDED
+  DEADLINE_UPDATED
+  PRIORITY_CHANGED
+  AUTO_TRANSITIONED
+  INSTANCE_COMPLETED
+  INSTANCE_CANCELLED
+  SYSTEM_EVENT
+}
+
+model WorkflowTimelineEvent {
+  id                 String                    @id @default(uuid()) @map("id")
+  tenantId           String                    @map("tenant_id")
+  workflowInstanceId String                    @map("workflow_instance_id")
+  type               WorkflowTimelineEventType @map("type")
+  title              String                    @map("title") @db.VarChar(300)
+  description        String?                   @map("description") @db.Text
+  transitionLogId    String?                   @map("transition_log_id")
+  approvalId         String?                   @map("approval_id")
+  taskId             String?                   @map("task_id")
+  instanceStageId    String?                   @map("instance_stage_id")
+  occurredAt         DateTime                  @default(now()) @map("occurred_at")
+  createdBy          String?                   @map("created_by")
+  metadata           Json?                     @default("{}") @map("metadata")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+
+  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  @@index([workflowInstanceId, occurredAt])
+  @@index([tenantId, workflowInstanceId, type])
+  @@index([tenantId, occurredAt])
+  @@index([occurredAt])
+  @@map("workflow_timeline_events")
 }

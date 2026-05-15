@@ -1,0 +1,144 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# BIDFLOW PLATFORM — Spec Template: Domain (DDD puro)
+# ═══════════════════════════════════════════════════════════════════════════
+# Template para especificar o domínio puro de um aggregate ou entidade.
+# Focado em DDD tático: entidades, VOs, invariantes, eventos, regras.
+# Schema version: 1.0 | Spec-Driven Development
+# ═══════════════════════════════════════════════════════════════════════════
+
+domain:
+  # ── Metadata ──
+  id: "[entity-name]"
+  name: "[Nome da Entidade de Domínio]"
+  description: "[Descrição detalhada da entidade e seu propósito no domínio]"
+  type: "aggregate-root | entity | value-object"
+  bounded_context: "[context-name]"
+
+  # ── Business Language ──
+  ubiquitous_language:
+    term: "[Termo]"
+    definition: "[Definição no linguajar do domínio]"
+    synonyms: ["[sinônimo 1]", "[sinônimo 2]"]
+
+  # ── Attributes ──
+  attributes:
+    - name: "id"
+      type: "uuid"
+      required: true
+      description: "Identificador único"
+      immutable: true
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+    - name: "tenantId"
+      type: "uuid"
+      required: true
+      description: "Identificador do tenant (multi-tenant)"
+      immutable: true
+
+    - name: "[field_name]"
+      type: "string | integer | decimal | boolean | date | enum | uuid | json | money"
+      required: true
+      description: "[Descrição do campo]"
+      example: "[valor de exemplo]"
+      min: null          # para number
+      max: null          # para number
+      max_length: null   # para string
+      pattern: null      # regex para string
+      enum: []           # valores possíveis (se type = enum)
+
+  # ── Invariants ──
+  invariants:
+    - "[regra de consistência que SEMPRE deve ser verdade]"
+    - "[Ex: closingDate deve ser posterior a openingDate]"
+    - "[Ex: status COMPLETED exige campo filled]"
+
+  # ── State Machine (se aplicável) ──
+  state_machine:
+    initial: "STATE_A"
+    states:
+      - id: "STATE_A"
+        label: "Estado A"
+        description: "[Descrição do estado]"
+        allowed_transitions: ["STATE_B", "STATE_C"]
+        final: false
+      - id: "STATE_B"
+        label: "Estado B"
+        allowed_transitions: ["STATE_C"]
+      - id: "STATE_C"
+        label: "Estado C"
+        final: true
+
+  # ── Factory Methods ──
+  factories:
+    - name: "create"
+      description: "Cria uma nova instância da entidade"
+      params:
+        - name: "[param]"     type: "[type]"     required: true
+      events_produced: ["[EntityCreatedEvent]"]
+      rules:
+        - "[regra validada no factory]"
+
+    - name: "restore"
+      description: "Reconstitui a entidade a partir de dados persistidos"
+      params:
+        - name: "data"        type: "[EntityData]"  required: true
+
+  # ── Business Methods ──
+  methods:
+    - name: "[actionName]"
+      description: "[Descrição da ação de negócio]"
+      params:
+        - name: "[param]"     type: "[type]"     required: true
+      events_produced: ["[DomainEventName]"]
+      rules:
+        - "[regra de negócio 1]"
+        - "[regra de negócio 2]"
+      throws: ["[ExceptionName]"]
+
+  # ── Value Objects (se esta entidade usa VOs) ──
+  value_objects:
+    - name: "[ValueObjectName]"
+      description: "[Descrição]"
+      attributes:
+        - name: "[field]"     type: "[type]"     validation: "[rule]"
+      invariants:
+        - "[invariante do VO]"
+
+  # ── Domain Events ──
+  events_produced:
+    - name: "[Entity][Action]Event"
+      type: "com.bidflow.{context}.{entity}.{action}.v1"
+      when: "[condição que dispara o evento]"
+      payload:
+        - name: "[field]"     type: "[type]"     description: "[descrição]"
+
+  events_consumed:
+    - name: "[ExternalEventName]"
+      type: "com.bidflow.{context}.{entity}.{action}.v1"
+      reaction: "[ação tomada ao consumir o evento]"
+
+  # ── Relationships ──
+  relationships:
+    - type: "aggregate-root | entity | value-object"
+      relation: "has_many | has_one | belongs_to"
+      target: "[EntityName]"
+      via: "[foreignKey]"
+      on_delete: "CASCADE | RESTRICT | SET_NULL"
+
+  # ── Repository Contract ──
+  repository:
+    interface: "[EntityName]Repository"
+    methods:
+      - "save(entity: [EntityName]): Promise<void>"
+      - "findById(id: string): Promise<[EntityName] | null>"
+      - "findMany(filter: Filter): Promise<[EntityName][]>"
+      - "count(filter: Filter): Promise<number>"
+      - "delete(id: string): Promise<void>"
+
+  # ── Examples ──
+  examples:
+    - scenario: "[Nome do cenário]"
+      given: "[Condição inicial]"
+      when: "[Ação executada]"
+      then: "[Resultado esperado]"
+      events: ["[Eventos disparados]"]
