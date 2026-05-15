@@ -1,0 +1,1073 @@
+// BidFlow Platform - Prisma Schema
+// Arquitetura Multi-Tenant com RLS
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// TENANT & MULTI-TENANT
+// ============================================
+
+model Tenant {
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  status      TenantStatus  @default(ACTIVE)
+  config      Json          @default("{}")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  users              User[]
+  subscription       Subscription?
+  contacts           Contact[]
+  companies          Company[]
+  salesPipelines     SalesPipeline[]
+  deals              Deal[]
+  activities         Activity[]
+  projects           Project[]
+  financialTransactions FinancialTransaction[]
+  costCenters        CostCenter[]
+  biddings           Bidding[]
+  biddingProposals  BiddingProposal[]
+  workflowDefinitions Workflow[]
+  workflowInstances  WorkflowInstance[]
+  invoices           Invoice[]
+  payments           Payment[]
+  usageMetrics       UsageMetric[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+  TRIAL
+}
+
+model Subscription {
+  id              String            @id @default(uuid())
+  tenantId        String            @unique
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  planId          String
+  plan            Plan              @relation(fields: [planId], references: [id])
+  status          SubscriptionStatus @default(ACTIVE)
+  billingCycle    BillingCycle      @default(MONTHLY)
+  startDate       DateTime
+  endDate         DateTime?
+  trialEndDate    DateTime?
+  autoRenew       Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  invoices        Invoice[]
+  payments        Payment[]
+  addons          SubscriptionAddon[]
+  featureLimits   FeatureLimit[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELED
+  PAST_DUE
+  TRIALING
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model Plan {
+  id            String    @id @default(uuid())
+  name          String    @unique
+  displayName   String
+  description   String?
+  price         Decimal   @db.Decimal(10, 2)
+  billingCycle  BillingCycle
+  isActive      Boolean  @default(true)
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptions Subscription[]
+  features      PlanFeature[]
+  limits        PlanLimit[]
+}
+
+model PlanFeature {
+  id        String  @id @default(uuid())
+  planId    String
+  plan      Plan    @relation(fields: [planId], references: [id])
+  feature   String
+  enabled   Boolean @default(true)
+
+  @@unique([planId, feature])
+}
+
+model PlanLimit {
+  id       String  @id @default(uuid())
+  planId   String
+  plan     Plan    @relation(fields: [planId], references: [id])
+  resource String
+  limit    Int
+  unit     String
+
+  @@unique([planId, resource])
+}
+
+model FeatureLimit {
+  id            String       @id @default(uuid())
+  subscriptionId String
+  subscription  Subscription @relation(fields: [subscriptionId], references: [id])
+  resource      String
+  limit         Int
+  used          Int          @default(0)
+
+  @@unique([subscriptionId, resource])
+}
+
+model Addon {
+  id          String    @id @default(uuid())
+  name        String
+  displayName String
+  price       Decimal   @db.Decimal(10, 2)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  subscriptionAddons SubscriptionAddon[]
+}
+
+model SubscriptionAddon {
+  id              String      @id @default(uuid())
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id])
+  addonId         String
+  addon           Addon       @relation(fields: [addonId], references: [id])
+  createdAt       DateTime    @default(now())
+
+  @@unique([subscriptionId, addonId])
+}
+
+// ============================================
+// USERS & AUTH
+// ============================================
+
+model User {
+  id            String       @id @default(uuid())
+  tenantId      String
+  tenant        Tenant       @relation(fields: [tenantId], references: [id])
+  email         String
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole     @default(USER)
+  status        UserStatus   @default(ACTIVE)
+  avatarUrl     String?
+  phone         String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  sessions      Session[]
+  activities    Activity[]
+  tasks         Task[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+  SUSPENDED
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ipAddress String?
+  userAgent String?
+
+  @@index([token])
+  @@index([userId])
+}
+
+// ============================================
+// CRM - Customer Relationship Management
+// ============================================
+
+model Contact {
+  id          String        @id @default(uuid())
+  tenantId    String
+  tenant      Tenant        @relation(fields: [tenantId], references: [id])
+  companyId   String?
+  company     Company?     @relation(fields: [companyId], references: [id])
+  name        String
+  email       String?
+  phone       String?
+  position    String?
+  department  String?
+  status      ContactStatus @default(ACTIVE)
+  source      String?
+  customFields Json        @default("{}")
+  score       Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  deals       Deal[]
+  activities  Activity[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([companyId])
+}
+
+enum ContactStatus {
+  ACTIVE
+  INACTIVE
+  LEAD
+  CUSTOMER
+  CHURNED
+}
+
+model Company {
+  id          String         @id @default(uuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  name        String
+  tradeName   String?
+  cnpj        String?
+  cpf         String?
+  segment     String?
+  size        CompanySize?
+  website     String?
+  description String?
+  address     Json?
+  status      CompanyStatus  @default(PROSPECT)
+  score       Int            @default(0)
+  customFields Json         @default("{}")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  contacts    Contact[]
+  deals       Deal[]
+  projects    Project[]
+
+  @@unique([tenantId, cnpj])
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum CompanySize {
+  MEI
+  EPP
+  MEDIA
+  GRANDE
+  MULTINACIONAL
+}
+
+enum CompanyStatus {
+  PROSPECT
+  CUSTOMER
+  INACTIVE
+  CHURNED
+}
+
+model SalesPipeline {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  name        String
+  description String?
+  isDefault   Boolean   @default(false)
+  stages      Json      @default("[]")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  deals       Deal[]
+
+  @@index([tenantId])
+}
+
+model Deal {
+  id                String        @id @default(uuid())
+  tenantId          String
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  companyId         String
+  company           Company       @relation(fields: [companyId], references: [id])
+  contactId         String
+  contact           Contact       @relation(fields: [contactId], references: [id])
+  pipelineId        String
+  pipeline          SalesPipeline @relation(fields: [pipelineId], references: [id])
+  title             String
+  value             Decimal       @db.Decimal(15, 2)
+  currency          String        @default("BRL")
+  stage             String
+  probability       Int           @default(0)
+  expectedCloseDate DateTime?
+  status            DealStatus    @default(OPEN)
+  wonAt             DateTime?
+  lostAt            DateTime?
+  lostReason        String?
+  customFields      Json          @default("{}")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  activities        Activity[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([status])
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+  ABANDONED
+}
+
+model Activity {
+  id          String         @id @default(uuid())
+  tenantId    String
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  type        ActivityType
+  title       String
+  description String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  status      ActivityStatus @default(PENDING)
+  userId      String?
+  user        User?          @relation(fields: [userId], references: [id])
+  dealId      String?
+  deal        Deal?          @relation(fields: [dealId], references: [id])
+  contactId   String?
+  contact     Contact?       @relation(fields: [contactId], references: [id])
+  customFields Json         @default("{}")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([dealId])
+}
+
+enum ActivityType {
+  CALL
+  MEETING
+  EMAIL
+  TASK
+  NOTE
+}
+
+enum ActivityStatus {
+  PENDING
+  COMPLETED
+  CANCELED
+}
+
+// ============================================
+// ERP - Enterprise Resource Planning
+// ============================================
+
+model Project {
+  id            String        @id @default(uuid())
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  companyId     String?
+  company       Company?      @relation(fields: [companyId], references: [id])
+  name          String
+  description   String?
+  type          ProjectType
+  status        ProjectStatus @default(PLANNING)
+  startDate     DateTime
+  endDate       DateTime?
+  budget        Decimal       @db.Decimal(15, 2)
+  currency      String        @default("BRL")
+  costCenterId  String?
+  costCenter    CostCenter?   @relation(fields: [costCenterId], references: [id])
+  managerId     String?
+  customFields  Json          @default("{}")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  tasks         Task[]
+  milestones    Milestone[]
+  expenses      Expense[]
+  contracts     Contract[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum ProjectType {
+  INTERNAL
+  BIDDING
+  CLIENT
+  RESEARCH
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELED
+}
+
+model CostCenter {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  name        String
+  code        String
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  projects    Project[]
+  transactions FinancialTransaction[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model Task {
+  id          String     @id @default(uuid())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id])
+  title       String
+  description String?
+  status      TaskStatus @default(PENDING)
+  priority    Priority   @default(MEDIUM)
+  startDate   DateTime?
+  dueDate     DateTime?
+  completedAt DateTime?
+  assigneeId  String?
+  assignee    User?      @relation(fields: [assigneeId], references: [id])
+  parentId    String?
+  order       Int        @default(0)
+  customFields Json      @default("{}")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  subtasks    Task[]     @relation("TaskSubtask")
+  parent      Task?       @relation("TaskSubtask", fields: [parentId], references: [id])
+
+  @@index([projectId])
+  @@index([assigneeId])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+  CANCELED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Milestone {
+  id          String          @id @default(uuid())
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id])
+  name        String
+  description String?
+  dueDate     DateTime
+  completedAt DateTime?
+  status      MilestoneStatus @default(PENDING)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([projectId])
+}
+
+enum MilestoneStatus {
+  PENDING
+  COMPLETED
+  DELAYED
+}
+
+model FinancialTransaction {
+  id            String            @id @default(uuid())
+  tenantId      String
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  type          TransactionType
+  category      String
+  amount        Decimal           @db.Decimal(15, 2)
+  currency      String            @default("BRL")
+  description   String?
+  date          DateTime
+  status        TransactionStatus @default(PENDING)
+  projectId     String?
+  costCenterId  String?
+  costCenter    CostCenter?       @relation(fields: [costCenterId], references: [id])
+  paymentMethod String?
+  attachments   Json              @default("[]")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([tenantId])
+  @@index([date])
+  @@index([type])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  RECONCILED
+  CANCELED
+}
+
+model Expense {
+  id          String    @id @default(uuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  description String
+  amount      Decimal   @db.Decimal(15, 2)
+  currency    String    @default("BRL")
+  date        DateTime
+  category    String
+  receiptUrl  String?
+  status      String    @default("PENDING")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId])
+}
+
+model Contract {
+  id          String        @id @default(uuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id])
+  number      String
+  title       String
+  type        ContractType
+  value       Decimal       @db.Decimal(15, 2)
+  startDate   DateTime
+  endDate     DateTime?
+  status      ContractStatus @default(DRAFT)
+  fileUrl     String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([projectId, number])
+  @@index([projectId])
+}
+
+enum ContractType {
+  SERVICE
+  SUPPLY
+  WORKS
+  CONSULTING
+}
+
+enum ContractStatus {
+  DRAFT
+  SIGNED
+  ACTIVE
+  COMPLETED
+  TERMINATED
+}
+
+// ============================================
+// BIDDING - Core Business
+// ============================================
+
+model Bidding {
+  id                String           @id @default(uuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
+  title             String
+  description       String?
+  type              BiddingType
+  modality          BiddingModality
+  status            BiddingStatus    @default(DRAFT)
+  regime            BiddingRegime?
+  processNumber     String
+  edNumber          String?
+  publicationDate  DateTime
+  openingDate       DateTime
+  closingDate       DateTime
+  clarificationDeadline DateTime?
+  appealDeadline   DateTime?
+  estimatedValue    Decimal          @db.Decimal(15, 2)
+  currency          String           @default("BRL")
+  contractingEntity String
+  location          Json?
+  category          String?
+  source            BiddingSource
+  sourceUrl         String?
+  suitabilityScore Int?
+  recommendationScore Int?
+  tags              String[]         @default([])
+  customFields      Json             @default("{}")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  documents         BiddingDocument[]
+  questions         BiddingQuestion[]
+  proposals         BiddingProposal[]
+  clarifications    Clarification[]
+  analysis          BiddingAnalysis?
+
+  @@unique([tenantId, processNumber])
+  @@index([tenantId])
+  @@index([status])
+  @@index([closingDate])
+  @@index([type])
+}
+
+enum BiddingType {
+  PUBLIC
+  PRIVATE
+  ELECTRONIC
+  PRESENTIAL
+}
+
+enum BiddingModality {
+  PREGAO
+  CONCORRENCIA
+  TOMADA_DE_PRECO
+  CONVITE
+  DISPENSA
+  INEXIGIBILIDADE
+}
+
+enum BiddingStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  AWARDED
+  CANCELED
+  ARCHIVED
+}
+
+enum BiddingRegime {
+  Lei8666
+  PregaoEletronico
+  RDC
+  PPP
+  CONCESSAO
+}
+
+enum BiddingSource {
+  COMPRASNET
+  COMARCA
+  PORTAL_TRANSPARENCIA
+  DOM_SUP
+  BNMP
+  DIRECT
+  MANUAL
+}
+
+model BiddingDocument {
+  id          String   @id @default(uuid())
+  biddingId   String
+  bidding     Bidding  @relation(fields: [biddingId], references: [id])
+  name        String
+  type        String
+  fileUrl     String
+  size        Int?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([biddingId])
+}
+
+model BiddingQuestion {
+  id          String           @id @default(uuid())
+  biddingId   String
+  bidding     Bidding          @relation(fields: [biddingId], references: [id])
+  question    String
+  answer      String?
+  status      QuestionStatus   @default(PENDING)
+  askedBy     String?
+  answeredAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([biddingId])
+}
+
+enum QuestionStatus {
+  PENDING
+  ANSWERED
+  CLARIFICATION
+}
+
+model BiddingProposal {
+  id                String          @id @default(uuid())
+  tenantId          String
+  tenant            Tenant          @relation(fields: [tenantId], references: [id])
+  biddingId         String
+  bidding           Bidding         @relation(fields: [biddingId], references: [id])
+  bidderName        String
+  bidderDocument    String
+  totalValue        Decimal         @db.Decimal(15, 2)
+  discount          Decimal         @db.Decimal(5, 2)
+  paymentTerms     String?
+  validity          Int             @default(90)
+  documents         Json            @default("[]")
+  status            ProposalStatus  @default(DRAFT)
+  submittedAt       DateTime?
+  technicalScore    Int?
+  commercialScore   Int?
+  finalScore        Int?
+  rank              Int?
+  winner            Boolean         @default(false)
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([biddingId])
+  @@index([tenantId])
+}
+
+enum ProposalStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_ANALYSIS
+  QUALIFIED
+  DISQUALIFIED
+  WINNER
+  RUNNER_UP
+}
+
+model Clarification {
+  id          String   @id @default(uuid())
+  biddingId   String
+  bidding     Bidding  @relation(fields: [biddingId], references: [id])
+  title       String
+  content     String
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([biddingId])
+}
+
+model BiddingAnalysis {
+  id                    String   @id @default(uuid())
+  biddingId             String   @unique
+  bidding               Bidding  @relation(fields: [biddingId], references: [id])
+  suitabilityScore      Int?
+  riskScore             Int?
+  competitorCount       Int?
+  estimatedCompetitors  Int?
+  priceRecommendation   Decimal? @db.Decimal(15, 2)
+  profitability        Decimal? @db.Decimal(5, 2)
+  recommendation        String?
+  analysis              Json     @default("{}")
+  processingStatus      String   @default("PENDING")
+  completedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ============================================
+// WORKFLOW
+// ============================================
+
+model Workflow {
+  id            String          @id @default(uuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  name          String
+  description   String?
+  category     String?
+  version      Int             @default(1)
+  status       WorkflowStatus  @default(DRAFT)
+  definition   Json
+  triggers     Json            @default("[]")
+  variables    Json            @default("{}")
+  isTemplate   Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  instances    WorkflowInstance[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+model WorkflowInstance {
+  id          String              @id @default(uuid())
+  workflowId  String
+  workflow    Workflow            @relation(fields: [workflowId], references: [id])
+  tenantId    String
+  tenant      Tenant              @relation(fields: [tenantId], references: [id])
+  status      InstanceStatus     @default(PENDING)
+  currentNode String
+  context     Json                @default("{}")
+  variables   Json                @default("{}")
+  startedAt   DateTime            @default(now())
+  completedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  tasks       WorkflowTask[]
+  history     ExecutionHistory[]
+
+  @@index([workflowId])
+  @@index([status])
+}
+
+enum InstanceStatus {
+  PENDING
+  RUNNING
+  WAITING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+model WorkflowTask {
+  id          String      @id @default(uuid())
+  instanceId  String
+  instance    WorkflowInstance @relation(fields: [instanceId], references: [id])
+  nodeId      String
+  name        String
+  type        String
+  status      TaskStatus  @default(PENDING)
+  assigneeId String?
+  assignee    User?       @relation(fields: [assigneeId], references: [id])
+  input       Json        @default("{}")
+  output      Json        @default("{}")
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([instanceId])
+  @@index([status])
+}
+
+enum TaskStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+model ExecutionHistory {
+  id          String   @id @default(uuid())
+  instanceId  String
+  instance    WorkflowInstance @relation(fields: [instanceId], references: [id])
+  nodeId      String
+  nodeName    String
+  status      String
+  input       Json     @default("{}")
+  output      Json     @default("{}")
+  duration    Int?
+  error       String?
+  executedAt  DateTime @default(now())
+
+  @@index([instanceId])
+}
+
+// ============================================
+// SAAS - Billing
+// ============================================
+
+model Invoice {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  subscriptionId String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
+  number          String
+  status          InvoiceStatus @default(PENDING)
+  items           Json          @default("[]")
+  subtotal        Decimal       @db.Decimal(15, 2)
+  tax             Decimal       @db.Decimal(15, 2)
+  total           Decimal       @db.Decimal(15, 2)
+  currency       String        @default("BRL")
+  dueDate        DateTime
+  paidAt         DateTime?
+  paymentMethod  String?
+  pdfUrl         String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([tenantId, number])
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+  REFUNDED
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  subscriptionId String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
+  invoiceId       String?
+  invoice         Invoice?      @relation(fields: [invoiceId], references: [id])
+  amount          Decimal       @db.Decimal(15, 2)
+  currency       String        @default("BRL")
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  gatewayId      String?
+  gatewayResponse Json?
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  PIX
+  BOLETO
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+model UsageMetric {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  subscriptionId String?
+  resource        String
+  usage           Int      @default(0)
+  period          String
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tenantId, resource, periodStart])
+  @@index([tenantId])
+}
+
+// ============================================
+// IA - Artificial Intelligence
+// ============================================
+
+model AIAnalysis {
+  id              String          @id @default(uuid())
+  tenantId        String
+  type            String
+  status          AnalysisStatus  @default(PENDING)
+  input           Json            @default("{}")
+  output          Json?
+  model           String?
+  confidence      Int?
+  processingTime  Int?
+  errors          String[]        @default([])
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum AnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Prediction {
+  id          String   @id @default(uuid())
+  tenantId    String
+  type        String
+  entityId    String
+  entityType  String
+  result      Json
+  confidence  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+}
+
+// ============================================
+// AUDIT & LOGGING
+// ============================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String
+  changes     Json     @default("{}")
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
