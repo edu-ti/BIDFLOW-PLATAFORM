@@ -16,8 +16,8 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  bids      Bid[]
-  auctions  Auction[]
+  bids     Bid[]
+  auctions Auction[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -66,8 +66,8 @@ model Bid {
   amount    Decimal  @map("amount") @db.Decimal(10, 2)
   createdAt DateTime @default(now()) @map("created_at")
 
-  userId    String  @map("user_id")
-  auctionId String  @map("auction_id")
+  userId    String @map("user_id")
+  auctionId String @map("auction_id")
 
   user    User    @relation(fields: [userId], references: [id])
   auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
@@ -131,11 +131,11 @@ model Lead {
   createdAt              DateTime   @default(now()) @map("created_at")
   updatedAt              DateTime   @updatedAt @map("updated_at")
 
-  activities   Activity[]      @relation("LeadActivities")
-  tasks        Task[]          @relation("LeadTasks")
-  timeline     TimelineEntry[] @relation("LeadTimeline")
-  opportunities Opportunity[]  @relation("LeadOpportunities")
-  customer     Customer?       @relation("LeadToCustomer")
+  activities    Activity[]      @relation("LeadActivities")
+  tasks         Task[]          @relation("LeadTasks")
+  timeline      TimelineEntry[] @relation("LeadTimeline")
+  opportunities Opportunity[]   @relation("LeadOpportunities")
+  customer      Customer?       @relation("LeadToCustomer")
 
   @@index([tenantId, email])
   @@index([tenantId, status])
@@ -173,38 +173,38 @@ enum CustomerTier {
 }
 
 model Customer {
-  id               String         @id @default(uuid()) @map("id")
-  tenantId         String         @map("tenant_id")
-  legalName        String         @map("legal_name") @db.VarChar(255)
-  fantasyName      String?        @map("fantasy_name") @db.VarChar(255)
-  taxId            String         @map("tax_id") @db.VarChar(20)
-  email            String         @map("email") @db.VarChar(255)
-  phone            String?        @map("phone") @db.VarChar(30)
-  website          String?        @map("website") @db.VarChar(500)
-  address          Json?          @map("address")
-  status           CustomerStatus @default(ACTIVE) @map("status")
+  id               String          @id @default(uuid()) @map("id")
+  tenantId         String          @map("tenant_id")
+  legalName        String          @map("legal_name") @db.VarChar(255)
+  fantasyName      String?         @map("fantasy_name") @db.VarChar(255)
+  taxId            String          @map("tax_id") @db.VarChar(20)
+  email            String          @map("email") @db.VarChar(255)
+  phone            String?         @map("phone") @db.VarChar(30)
+  website          String?         @map("website") @db.VarChar(500)
+  address          Json?           @map("address")
+  status           CustomerStatus  @default(ACTIVE) @map("status")
   segment          CustomerSegment @default(PRIVATE) @map("segment")
-  tier             CustomerTier   @default(BRONZE) @map("tier")
-  tierChangedAt    DateTime?      @map("tier_changed_at")
-  leadId           String?        @map("lead_id") @unique
-  assignedTo       String?        @map("assigned_to")
-  contacts         Json?          @default("[]") @map("contacts")
-  tags             Json?          @default("[]") @map("tags")
-  customFields     Json?          @default("{}") @map("custom_fields")
-  notes            String?        @map("notes") @db.Text
-  lastActivityAt   DateTime?      @map("last_activity_at")
-  lastActivityType String?        @map("last_activity_type") @db.VarChar(50)
-  totalRevenue     Decimal        @default(0) @map("total_revenue") @db.Decimal(14, 2)
-  wonOpportunities Int            @default(0) @map("won_opportunities")
-  deletedAt        DateTime?      @map("deleted_at")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
+  tier             CustomerTier    @default(BRONZE) @map("tier")
+  tierChangedAt    DateTime?       @map("tier_changed_at")
+  leadId           String?         @unique @map("lead_id")
+  assignedTo       String?         @map("assigned_to")
+  contacts         Json?           @default("[]") @map("contacts")
+  tags             Json?           @default("[]") @map("tags")
+  customFields     Json?           @default("{}") @map("custom_fields")
+  notes            String?         @map("notes") @db.Text
+  lastActivityAt   DateTime?       @map("last_activity_at")
+  lastActivityType String?         @map("last_activity_type") @db.VarChar(50)
+  totalRevenue     Decimal         @default(0) @map("total_revenue") @db.Decimal(14, 2)
+  wonOpportunities Int             @default(0) @map("won_opportunities")
+  deletedAt        DateTime?       @map("deleted_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
 
-  lead          Lead?            @relation("LeadToCustomer", fields: [leadId], references: [id])
-  opportunities Opportunity[]    @relation("CustomerOpportunities")
-  activities    Activity[]       @relation("CustomerActivities")
-  tasks         Task[]           @relation("CustomerTasks")
-  timeline      TimelineEntry[]  @relation("CustomerTimeline")
+  lead          Lead?           @relation("LeadToCustomer", fields: [leadId], references: [id])
+  opportunities Opportunity[]   @relation("CustomerOpportunities")
+  activities    Activity[]      @relation("CustomerActivities")
+  tasks         Task[]          @relation("CustomerTasks")
+  timeline      TimelineEntry[] @relation("CustomerTimeline")
 
   @@index([tenantId, email])
   @@index([tenantId, taxId])
@@ -280,12 +280,12 @@ model Opportunity {
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 
-  pipeline    Pipeline        @relation(fields: [pipelineId], references: [id])
-  lead        Lead?           @relation("LeadOpportunities", fields: [leadId], references: [id])
-  customer    Customer?       @relation("CustomerOpportunities", fields: [customerId], references: [id])
-  activities  Activity[]      @relation("OpportunityActivities")
-  tasks       Task[]          @relation("OpportunityTasks")
-  timeline    TimelineEntry[] @relation("OpportunityTimeline")
+  pipeline   Pipeline        @relation(fields: [pipelineId], references: [id])
+  lead       Lead?           @relation("LeadOpportunities", fields: [leadId], references: [id])
+  customer   Customer?       @relation("CustomerOpportunities", fields: [customerId], references: [id])
+  activities Activity[]      @relation("OpportunityActivities")
+  tasks      Task[]          @relation("OpportunityTasks")
+  timeline   TimelineEntry[] @relation("OpportunityTimeline")
 
   @@index([tenantId, pipelineId, stage])
   @@index([tenantId, customerId])
@@ -464,30 +464,30 @@ model TimelineEntry {
 // Armazenado no schema public (global). Each tenant has N definitions.
 
 model WorkflowDefinition {
-  id                      String   @id @default(uuid()) @map("id")
-  tenantId                String   @map("tenant_id")
-  name                    String   @map("name") @db.VarChar(150)
-  slug                    String   @map("slug") @db.VarChar(80)
-  description             String?  @map("description") @db.Text
-  entityType              String   @map("entity_type") @db.VarChar(100)
-  icon                    String?  @map("icon") @db.VarChar(50)
-  color                   String?  @map("color") @db.VarChar(7)
-  version                 Int      @default(1) @map("version")
-  isActive                Boolean  @default(true) @map("is_active")
-  isPublished             Boolean  @default(false) @map("is_published")
-  publishedAt             DateTime? @map("published_at")
-  maxConcurrentInstances  Int?     @map("max_concurrent_instances")
-  metadata                Json?    @default("{}") @map("metadata")
-  createdBy               String   @map("created_by")
-  deletedAt               DateTime? @map("deleted_at")
-  deletedBy               String?  @map("deleted_by")
-  deletedReason           String?  @map("deleted_reason") @db.VarChar(500)
-  createdAt               DateTime @default(now()) @map("created_at")
-  updatedAt               DateTime @updatedAt @map("updated_at")
+  id                     String    @id @default(uuid()) @map("id")
+  tenantId               String    @map("tenant_id")
+  name                   String    @map("name") @db.VarChar(150)
+  slug                   String    @map("slug") @db.VarChar(80)
+  description            String?   @map("description") @db.Text
+  entityType             String    @map("entity_type") @db.VarChar(100)
+  icon                   String?   @map("icon") @db.VarChar(50)
+  color                  String?   @map("color") @db.VarChar(7)
+  version                Int       @default(1) @map("version")
+  isActive               Boolean   @default(true) @map("is_active")
+  isPublished            Boolean   @default(false) @map("is_published")
+  publishedAt            DateTime? @map("published_at")
+  maxConcurrentInstances Int?      @map("max_concurrent_instances")
+  metadata               Json?     @default("{}") @map("metadata")
+  createdBy              String    @map("created_by")
+  deletedAt              DateTime? @map("deleted_at")
+  deletedBy              String?   @map("deleted_by")
+  deletedReason          String?   @map("deleted_reason") @db.VarChar(500)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  stages       WorkflowStage[]      @relation("DefinitionStages")
-  transitions  WorkflowTransition[] @relation("DefinitionTransitions")
-  instances    WorkflowInstance[]   @relation("DefinitionInstances")
+  stages      WorkflowStage[]      @relation("DefinitionStages")
+  transitions WorkflowTransition[] @relation("DefinitionTransitions")
+  instances   WorkflowInstance[]   @relation("DefinitionInstances")
 
   @@unique([tenantId, slug])
   @@index([tenantId, entityType])
@@ -511,41 +511,41 @@ enum StageType {
 }
 
 model WorkflowStage {
-  id                     String        @id @default(uuid()) @map("id")
-  workflowDefinitionId   String        @map("workflow_definition_id")
-  slug                   String        @map("slug") @db.VarChar(80)
-  name                   String        @map("name") @db.VarChar(100)
-  description            String?       @map("description") @db.VarChar(500)
-  order                  Int           @map("order")
-  color                  String?       @map("color") @db.VarChar(7)
-  type                   StageType     @default(STANDARD) @map("type")
-  isInitial              Boolean       @default(false) @map("is_initial")
-  isFinal                Boolean       @default(false) @map("is_final")
-  approvalConfig         Json?         @map("approval_config")
-  assignmentConfig       Json?         @map("assignment_config")
-  deadlineHours          Int?          @map("deadline_hours")
-  notifyOnEnter          Boolean       @default(false) @map("notify_on_enter")
-  notifyOnExit           Boolean       @default(false) @map("notify_on_exit")
-  allowRejection         Boolean       @default(true) @map("allow_rejection")
-  rejectionTargetStageId String?       @map("rejection_target_stage_id")
-  metadata               Json?         @default("{}") @map("metadata")
-  deletedAt              DateTime?     @map("deleted_at")
-  deletedBy              String?       @map("deleted_by")
-  deletedReason          String?       @map("deleted_reason") @db.VarChar(500)
-  createdAt              DateTime      @default(now()) @map("created_at")
-  updatedAt              DateTime      @updatedAt @map("updated_at")
+  id                     String    @id @default(uuid()) @map("id")
+  workflowDefinitionId   String    @map("workflow_definition_id")
+  slug                   String    @map("slug") @db.VarChar(80)
+  name                   String    @map("name") @db.VarChar(100)
+  description            String?   @map("description") @db.VarChar(500)
+  order                  Int       @map("order")
+  color                  String?   @map("color") @db.VarChar(7)
+  type                   StageType @default(STANDARD) @map("type")
+  isInitial              Boolean   @default(false) @map("is_initial")
+  isFinal                Boolean   @default(false) @map("is_final")
+  approvalConfig         Json?     @map("approval_config")
+  assignmentConfig       Json?     @map("assignment_config")
+  deadlineHours          Int?      @map("deadline_hours")
+  notifyOnEnter          Boolean   @default(false) @map("notify_on_enter")
+  notifyOnExit           Boolean   @default(false) @map("notify_on_exit")
+  allowRejection         Boolean   @default(true) @map("allow_rejection")
+  rejectionTargetStageId String?   @map("rejection_target_stage_id")
+  metadata               Json?     @default("{}") @map("metadata")
+  deletedAt              DateTime? @map("deleted_at")
+  deletedBy              String?   @map("deleted_by")
+  deletedReason          String?   @map("deleted_reason") @db.VarChar(500)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  definition      WorkflowDefinition   @relation("DefinitionStages", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
-  rejectionTarget WorkflowStage?       @relation("StageRejectionTarget", fields: [rejectionTargetStageId], references: [id])
-  rejectionOf     WorkflowStage[]      @relation("StageRejectionTarget")
+  definition      WorkflowDefinition @relation("DefinitionStages", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  rejectionTarget WorkflowStage?     @relation("StageRejectionTarget", fields: [rejectionTargetStageId], references: [id])
+  rejectionOf     WorkflowStage[]    @relation("StageRejectionTarget")
 
-  fromTransitions  WorkflowTransition[]  @relation("TransitionFromStage")
-  toTransitions    WorkflowTransition[]  @relation("TransitionToStage")
+  fromTransitions WorkflowTransition[] @relation("TransitionFromStage")
+  toTransitions   WorkflowTransition[] @relation("TransitionToStage")
 
-  instances            WorkflowInstance[]        @relation("InstanceCurrentStage")
-  instanceStageHistory WorkflowInstanceStage[]   @relation("StageToInstanceStage")
-  fromTransitionLogs   WorkflowTransitionLog[]   @relation("TransitionLogFromStage")
-  toTransitionLogs     WorkflowTransitionLog[]   @relation("TransitionLogToStage")
+  instances            WorkflowInstance[]      @relation("InstanceCurrentStage")
+  instanceStageHistory WorkflowInstanceStage[] @relation("StageToInstanceStage")
+  fromTransitionLogs   WorkflowTransitionLog[] @relation("TransitionLogFromStage")
+  toTransitionLogs     WorkflowTransitionLog[] @relation("TransitionLogToStage")
 
   @@unique([workflowDefinitionId, slug])
   @@index([workflowDefinitionId, order])
@@ -625,15 +625,15 @@ model WorkflowInstance {
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
 
-  definition   WorkflowDefinition  @relation("DefinitionInstances", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
-  currentStage WorkflowStage       @relation("InstanceCurrentStage", fields: [currentStageId], references: [id], onDelete: Restrict)
+  definition   WorkflowDefinition @relation("DefinitionInstances", fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  currentStage WorkflowStage      @relation("InstanceCurrentStage", fields: [currentStageId], references: [id], onDelete: Restrict)
 
-  stageHistory   WorkflowInstanceStage[]  @relation("InstanceStageHistory")
-  transitionLogs WorkflowTransitionLog[]  @relation("InstanceTransitionLogs")
-  approvals      WorkflowApproval[]       @relation("InstanceApprovals")
-  assignments    WorkflowAssignment[]     @relation("InstanceAssignments")
-  tasks          WorkflowTask[]           @relation("InstanceTasks")
-  timelineEvents WorkflowTimelineEvent[]  @relation("InstanceTimelineEvents")
+  stageHistory   WorkflowInstanceStage[] @relation("InstanceStageHistory")
+  transitionLogs WorkflowTransitionLog[] @relation("InstanceTransitionLogs")
+  approvals      WorkflowApproval[]      @relation("InstanceApprovals")
+  assignments    WorkflowAssignment[]    @relation("InstanceAssignments")
+  tasks          WorkflowTask[]          @relation("InstanceTasks")
+  timelineEvents WorkflowTimelineEvent[] @relation("InstanceTimelineEvents")
 
   @@unique([workflowDefinitionId, entityType, entityId])
   @@index([tenantId, workflowDefinitionId])
@@ -655,19 +655,19 @@ model WorkflowInstance {
 // ═══════════════════════════════════════════════════════════════════════════
 
 model WorkflowInstanceStage {
-  id                 String   @id @default(uuid()) @map("id")
-  tenantId           String   @map("tenant_id")
-  workflowInstanceId String   @map("workflow_instance_id")
-  stageId            String   @map("stage_id")
-  stageSlug          String   @map("stage_slug") @db.VarChar(80)
-  stageName          String   @map("stage_name") @db.VarChar(100)
-  stageOrder         Int      @map("stage_order")
+  id                 String    @id @default(uuid()) @map("id")
+  tenantId           String    @map("tenant_id")
+  workflowInstanceId String    @map("workflow_instance_id")
+  stageId            String    @map("stage_id")
+  stageSlug          String    @map("stage_slug") @db.VarChar(80)
+  stageName          String    @map("stage_name") @db.VarChar(100)
+  stageOrder         Int       @map("stage_order")
   stageType          StageType @map("stage_type")
-  enteredAt          DateTime @default(now()) @map("entered_at")
+  enteredAt          DateTime  @default(now()) @map("entered_at")
   exitedAt           DateTime? @map("exited_at")
-  transitionLogId    String?  @map("transition_log_id")
-  durationSeconds    Int?     @map("duration_seconds")
-  createdAt          DateTime @default(now()) @map("created_at")
+  transitionLogId    String?   @map("transition_log_id")
+  durationSeconds    Int?      @map("duration_seconds")
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   instance WorkflowInstance @relation("InstanceStageHistory", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
   stage    WorkflowStage    @relation("StageToInstanceStage", fields: [stageId], references: [id], onDelete: Restrict)
@@ -788,7 +788,7 @@ model WorkflowAssignment {
   delegatedTo        String?          @map("delegated_to")
   createdAt          DateTime         @default(now()) @map("created_at")
 
-  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+  instance WorkflowInstance @relation("InstanceAssignments", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
 
   @@index([workflowInstanceId, userId])
   @@index([tenantId, userId, status])
@@ -818,25 +818,25 @@ enum WorkflowTaskStatus {
 }
 
 model WorkflowTask {
-  id                 String            @id @default(uuid()) @map("id")
-  tenantId           String            @map("tenant_id")
-  workflowInstanceId String            @map("workflow_instance_id")
-  stageId            String            @map("stage_id")
-  title              String            @map("title") @db.VarChar(300)
-  description        String?           @map("description") @db.Text
-  type               WorkflowTaskType  @default(ACTION) @map("type")
+  id                 String             @id @default(uuid()) @map("id")
+  tenantId           String             @map("tenant_id")
+  workflowInstanceId String             @map("workflow_instance_id")
+  stageId            String             @map("stage_id")
+  title              String             @map("title") @db.VarChar(300)
+  description        String?            @map("description") @db.Text
+  type               WorkflowTaskType   @default(ACTION) @map("type")
   status             WorkflowTaskStatus @default(PENDING) @map("status")
-  assignedTo         String?           @map("assigned_to")
-  assignedBy         String?           @map("assigned_by")
-  isMandatory        Boolean           @default(true) @map("is_mandatory")
-  dueDate            DateTime?         @map("due_date")
-  completedAt        DateTime?         @map("completed_at")
-  completedBy        String?           @map("completed_by")
-  completedData      Json?             @map("completed_data")
-  createdAt          DateTime          @default(now()) @map("created_at")
-  updatedAt          DateTime          @updatedAt @map("updated_at")
+  assignedTo         String?            @map("assigned_to")
+  assignedBy         String?            @map("assigned_by")
+  isMandatory        Boolean            @default(true) @map("is_mandatory")
+  dueDate            DateTime?          @map("due_date")
+  completedAt        DateTime?          @map("completed_at")
+  completedBy        String?            @map("completed_by")
+  completedData      Json?              @map("completed_data")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
 
-  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+  instance WorkflowInstance @relation("InstanceTasks", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
 
   @@index([workflowInstanceId, status])
   @@index([tenantId, assignedTo, status])
@@ -890,11 +890,476 @@ model WorkflowTimelineEvent {
   metadata           Json?                     @default("{}") @map("metadata")
   createdAt          DateTime                  @default(now()) @map("created_at")
 
-  instance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+  instance WorkflowInstance @relation("InstanceTimelineEvents", fields: [workflowInstanceId], references: [id], onDelete: Cascade)
 
   @@index([workflowInstanceId, occurredAt])
   @@index([tenantId, workflowInstanceId, type])
   @@index([tenantId, occurredAt])
   @@index([occurredAt])
   @@map("workflow_timeline_events")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TENDERING ENUMS (Tendering V2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TenderStatus {
+  CAPTURED
+  ANALYZING
+  VIABILITY_ANALYSIS
+  DOCUMENTATION
+  APPROVAL
+  PROPOSAL
+  SUBMITTED
+  DISPUTE
+  RESULT_AWAITED
+  WON
+  LOST
+  APPEAL
+  CONTRACTED
+  CANCELLED
+  ARCHIVED
+}
+
+enum TenderModality {
+  PREGAO_ELETRONICO
+  PREGAO_PRESENCIAL
+  CONCORRENCIA
+  TOMADA_PRECOS
+  CONVITE
+  CONCURSO
+  LEILAO
+  RDC
+}
+
+enum TenderDocumentCategory {
+  HABILITACAO
+  TECNICA
+  COMERCIAL
+  ADMINISTRATIVO
+  OUTROS
+}
+
+enum TenderDocumentStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+enum TenderAnalysisType {
+  TECHNICAL
+  FINANCIAL
+  LEGAL
+  VIABILITY
+}
+
+enum TenderAnalysisStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TenderCompetitionLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TenderRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TenderAnalysisRecommendation {
+  GO
+  NO_GO
+  CONDITIONAL
+}
+
+enum TenderChecklistCategory {
+  DOCUMENTATION
+  TECHNICAL
+  FINANCIAL
+  LEGAL
+  OTHER
+}
+
+enum TenderChecklistStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+enum TenderDisputeStatus {
+  SCHEDULED
+  ACTIVE
+  CLOSED
+  SUSPENDED
+  CANCELLED
+}
+
+enum TenderResultStatus {
+  PENDING
+  WON
+  LOST
+  DISQUALIFIED
+  CANCELLED
+}
+
+enum TenderParticipationStatus {
+  REGISTERED
+  INTERESTED
+  SUBMITTED
+  DISQUALIFIED
+  WITHDRAWN
+}
+
+enum TenderDeadlineType {
+  CLARIFICATION
+  IMPUGNATION
+  PROPOSAL_SUBMISSION
+  DISPUTE
+  APPEAL
+  CONTRACT_SIGNING
+  OTHER
+}
+
+enum TenderDeadlineStatus {
+  PENDING
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum TenderTimelineEntryType {
+  CREATED
+  STATUS_CHANGED
+  DOCUMENT_ADDED
+  DOCUMENT_VALIDATED
+  DOCUMENT_REJECTED
+  ANALYSIS_COMPLETED
+  PROPOSAL_SUBMITTED
+  DISPUTE_STARTED
+  DISPUTE_CLOSED
+  BID_PLACED
+  RESULT_ANNOUNCED
+  CONTRACT_SIGNED
+  SYSTEM
+  NOTE
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TENDERING MODELS (Tendering V2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Tender {
+  id                 String         @id @default(uuid()) @map("id")
+  tenantId           String         @map("tenant_id")
+  externalId         String         @map("external_id") @db.VarChar(100)
+  organization       String         @map("organization") @db.VarChar(255)
+  modality           TenderModality @map("modality")
+  status             TenderStatus   @default(CAPTURED) @map("status")
+  title              String         @map("title") @db.VarChar(500)
+  description        String?        @map("description") @db.Text
+  estimatedValue     Decimal?       @map("estimated_value") @db.Decimal(14, 2)
+  openingDate        DateTime       @map("opening_date")
+  closingDate        DateTime       @map("closing_date")
+  disputeDate        DateTime?      @map("dispute_date")
+  uf                 String?        @map("uf") @db.VarChar(2)
+  city               String?        @map("city") @db.VarChar(100)
+  assignedTo         String?        @map("assigned_to")
+  workflowInstanceId String?        @map("workflow_instance_id")
+  assignedTeam       Json?          @map("assigned_team")
+  score              Int?           @map("score")
+  scoreCriteria      Json?          @map("score_criteria")
+  tags               Json?          @default("[]") @map("tags")
+  metadata           Json?          @default("{}") @map("metadata")
+  customFields       Json?          @default("{}") @map("custom_fields")
+  notes              String?        @map("notes") @db.Text
+  deletedAt          DateTime?      @map("deleted_at")
+  createdBy          String         @map("created_by")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  items           TenderItem[]
+  documents       TenderDocument[]
+  participations  TenderParticipation[]
+  proposals       TenderProposal[]
+  checklists      TenderChecklist[]
+  deadlines       TenderDeadline[]
+  timelineEntries TenderTimelineEntry[]
+  analyses        TenderAnalysis[]
+  result          TenderResult?
+  dispute         TenderDispute?
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, status])
+  @@index([tenantId, modality])
+  @@index([tenantId, uf])
+  @@index([tenantId, organization])
+  @@index([tenantId, openingDate])
+  @@index([tenantId, closingDate])
+  @@index([tenantId, assignedTo])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, workflowInstanceId])
+  @@map("tenders")
+}
+
+model TenderItem {
+  id             String   @id @default(uuid()) @map("id")
+  tenderId       String   @map("tender_id")
+  number         Int      @map("number")
+  description    String   @map("description") @db.Text
+  quantity       Decimal  @map("quantity") @db.Decimal(12, 4)
+  unit           String   @map("unit") @db.VarChar(50)
+  estimatedValue Decimal? @map("estimated_value") @db.Decimal(14, 2)
+  proposalValue  Decimal? @map("proposal_value") @db.Decimal(14, 2)
+  bidValue       Decimal? @map("bid_value") @db.Decimal(14, 2)
+  category       String?  @map("category") @db.VarChar(100)
+  specifications Json?    @map("specifications")
+  hasDispute     Boolean  @default(false) @map("has_dispute")
+  winner         Boolean? @map("winner")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, number])
+  @@index([tenderId, category])
+  @@map("tender_items")
+}
+
+model TenderDocument {
+  id              String                 @id @default(uuid()) @map("id")
+  tenderId        String                 @map("tender_id")
+  checklistItemId String?                @map("checklist_item_id")
+  category        TenderDocumentCategory @map("category")
+  title           String                 @map("title") @db.VarChar(300)
+  description     String?                @map("description") @db.Text
+  fileName        String                 @map("file_name") @db.VarChar(500)
+  fileSize        Int                    @map("file_size")
+  fileType        String                 @map("file_type") @db.VarChar(50)
+  fileUrl         String                 @map("file_url") @db.VarChar(2000)
+  fileHash        String?                @map("file_hash") @db.VarChar(64)
+  version         Int                    @default(1) @map("version")
+  isLatest        Boolean                @default(true) @map("is_latest")
+  status          TenderDocumentStatus   @default(PENDING) @map("status")
+  validatedBy     String?                @map("validated_by")
+  validatedAt     DateTime?              @map("validated_at")
+  rejectionReason String?                @map("rejection_reason") @db.VarChar(500)
+  uploadedBy      String                 @map("uploaded_by")
+  createdAt       DateTime               @default(now()) @map("created_at")
+
+  tender    Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  checklist TenderChecklist? @relation(fields: [checklistItemId], references: [id])
+
+  @@index([tenderId, category])
+  @@index([tenderId, checklistItemId])
+  @@index([tenderId, isLatest])
+  @@map("tender_documents")
+}
+
+model TenderAnalysis {
+  id                 String                        @id @default(uuid()) @map("id")
+  tenderId           String                        @map("tender_id")
+  type               TenderAnalysisType            @map("type")
+  status             TenderAnalysisStatus          @default(IN_PROGRESS) @map("status")
+  analystId          String                        @map("analyst_id")
+  analystName        String?                       @map("analyst_name") @db.VarChar(255)
+  technicalScore     Int?                          @map("technical_score")
+  objectFit          Int?                          @map("object_fit")
+  requirementsFit    Int?                          @map("requirements_fit")
+  experienceRequired Boolean?                      @map("experience_required")
+  financialScore     Int?                          @map("financial_score")
+  estimatedCost      Decimal?                      @map("estimated_cost") @db.Decimal(14, 2)
+  suggestedMargin    Decimal?                      @map("suggested_margin") @db.Decimal(5, 2)
+  competitionLevel   TenderCompetitionLevel?       @map("competition_level")
+  riskLevel          TenderRiskLevel?              @map("risk_level")
+  conclusion         String?                       @map("conclusion") @db.Text
+  recommendation     TenderAnalysisRecommendation? @map("recommendation")
+  priceResearch      Json?                         @map("price_research")
+  competitors        Json?                         @map("competitors")
+  attachments        Json?                         @map("attachments")
+  completedAt        DateTime?                     @map("completed_at")
+  completedBy        String?                       @map("completed_by")
+  createdBy          String                        @map("created_by")
+  createdAt          DateTime                      @default(now()) @map("created_at")
+  updatedAt          DateTime                      @updatedAt @map("updated_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, type])
+  @@index([tenderId])
+  @@index([tenderId, analystId])
+  @@map("tender_analyses")
+}
+
+model TenderChecklist {
+  id            String                  @id @default(uuid()) @map("id")
+  tenderId      String                  @map("tender_id")
+  category      TenderChecklistCategory @default(DOCUMENTATION) @map("category")
+  title         String                  @map("title") @db.VarChar(300)
+  description   String?                 @map("description") @db.Text
+  status        TenderChecklistStatus   @default(PENDING) @map("status")
+  isMandatory   Boolean                 @default(true) @map("is_mandatory")
+  order         Int                     @default(0) @map("order")
+  assignedTo    String?                 @map("assigned_to")
+  completedAt   DateTime?               @map("completed_at")
+  completedBy   String?                 @map("completed_by")
+  notes         String?                 @map("notes") @db.Text
+  autoGenerated Boolean                 @default(false) @map("auto_generated")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+
+  tender    Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  documents TenderDocument[]
+
+  @@index([tenderId, status])
+  @@index([tenderId, assignedTo])
+  @@index([tenderId, category])
+  @@map("tender_checklists")
+}
+
+model TenderProposal {
+  id                String    @id @default(uuid()) @map("id")
+  tenderId          String    @map("tender_id")
+  version           Int       @default(1) @map("version")
+  isSubmitted       Boolean   @default(false) @map("is_submitted")
+  submittedAt       DateTime? @map("submitted_at")
+  submittedBy       String?   @map("submitted_by")
+  totalValue        Decimal   @map("total_value") @db.Decimal(14, 2)
+  discountPercent   Decimal?  @map("discount_percent") @db.Decimal(5, 2)
+  itemValues        Json?     @map("item_values")
+  technicalProposal Json?     @map("technical_proposal")
+  commercialTerms   Json?     @map("commercial_terms")
+  observations      String?   @map("observations") @db.Text
+  signature         Json?     @map("signature")
+  createdBy         String    @map("created_by")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, version])
+  @@index([tenderId, isSubmitted])
+  @@map("tender_proposals")
+}
+
+model TenderDispute {
+  id            String              @id @default(uuid()) @map("id")
+  tenderId      String              @unique @map("tender_id")
+  status        TenderDisputeStatus @default(SCHEDULED) @map("status")
+  startPrice    Decimal             @map("start_price") @db.Decimal(14, 2)
+  currentPrice  Decimal             @map("current_price") @db.Decimal(14, 2)
+  minDecrement  Decimal             @map("min_decrement") @db.Decimal(10, 2)
+  extensionTime Int                 @default(180) @map("extension_time")
+  startedAt     DateTime?           @map("started_at")
+  closedAt      DateTime?           @map("closed_at")
+  winnerId      String?             @map("winner_id")
+  winnerAmount  Decimal?            @map("winner_amount") @db.Decimal(14, 2)
+  totalBids     Int                 @default(0) @map("total_bids")
+  extensions    Int                 @default(0) @map("extensions")
+  metadata      Json?               @default("{}") @map("metadata")
+
+  tender Tender             @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  bids   TenderDisputeBid[]
+
+  @@map("tender_disputes")
+}
+
+model TenderDisputeBid {
+  id             String   @id @default(uuid()) @map("id")
+  disputeId      String   @map("dispute_id")
+  supplierId     String   @map("supplier_id")
+  amount         Decimal  @map("amount") @db.Decimal(14, 2)
+  previousAmount Decimal? @map("previous_amount") @db.Decimal(14, 2)
+  isAutomatic    Boolean  @default(false) @map("is_automatic")
+  isWinner       Boolean? @map("is_winner")
+  timestamp      DateTime @default(now()) @map("timestamp")
+  round          Int      @map("round")
+
+  dispute TenderDispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, timestamp])
+  @@index([disputeId, supplierId])
+  @@map("tender_dispute_bids")
+}
+
+model TenderResult {
+  id               String             @id @default(uuid()) @map("id")
+  tenderId         String             @unique @map("tender_id")
+  status           TenderResultStatus @default(PENDING) @map("status")
+  classification   Int?               @map("classification")
+  totalScore       Decimal?           @map("total_score") @db.Decimal(10, 2)
+  technicalScore   Decimal?           @map("technical_score") @db.Decimal(10, 2)
+  commercialScore  Decimal?           @map("commercial_score") @db.Decimal(10, 2)
+  winnerValue      Decimal?           @map("winner_value") @db.Decimal(14, 2)
+  winnerName       String?            @map("winner_name") @db.VarChar(255)
+  winnerDocument   String?            @map("winner_document") @db.VarChar(20)
+  rankings         Json?              @map("rankings")
+  announcedAt      DateTime?          @map("announced_at")
+  appealDeadline   DateTime?          @map("appeal_deadline")
+  contractSignedAt DateTime?          @map("contract_signed_at")
+  observations     String?            @map("observations") @db.Text
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("tender_results")
+}
+
+model TenderParticipation {
+  id               String                    @id @default(uuid()) @map("id")
+  tenderId         String                    @map("tender_id")
+  supplierId       String                    @map("supplier_id")
+  supplierName     String                    @map("supplier_name") @db.VarChar(255)
+  supplierDocument String                    @map("supplier_document") @db.VarChar(20)
+  status           TenderParticipationStatus @default(REGISTERED) @map("status")
+  hasProposal      Boolean                   @default(false) @map("has_proposal")
+  bidCount         Int                       @default(0) @map("bid_count")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@unique([tenderId, supplierId])
+  @@index([tenderId, status])
+  @@map("tender_participations")
+}
+
+model TenderDeadline {
+  id           String               @id @default(uuid()) @map("id")
+  tenderId     String               @map("tender_id")
+  type         TenderDeadlineType   @map("type")
+  title        String               @map("title") @db.VarChar(300)
+  deadlineAt   DateTime             @map("deadline_at")
+  notifyBefore Int?                 @map("notify_before")
+  notifiedAt   DateTime?            @map("notified_at")
+  status       TenderDeadlineStatus @default(PENDING) @map("status")
+  createdAt    DateTime             @default(now()) @map("created_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@index([tenderId, deadlineAt])
+  @@index([tenderId, type, status])
+  @@map("tender_deadlines")
+}
+
+model TenderTimelineEntry {
+  id          String                  @id @default(uuid()) @map("id")
+  tenderId    String                  @map("tender_id")
+  type        TenderTimelineEntryType @map("type")
+  title       String                  @map("title") @db.VarChar(300)
+  description String?                 @map("description") @db.Text
+  occurredAt  DateTime                @default(now()) @map("occurred_at")
+  createdBy   String?                 @map("created_by")
+  metadata    Json?                   @default("{}") @map("metadata")
+  createdAt   DateTime                @default(now()) @map("created_at")
+
+  tender Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@index([tenderId, occurredAt])
+  @@index([tenderId, type])
+  @@map("tender_timeline_entries")
 }
