@@ -4,6 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuctionsModule } from './auctions/auctions.module';
 import { BidsModule } from './bids/bids.module';
+import { TendersModule } from './tenders/tenders.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { BidsModule } from './bids/bids.module';
     UsersModule,
     AuctionsModule,
     BidsModule,
+    TendersModule,
   ],
   controllers: [],
   providers: [],

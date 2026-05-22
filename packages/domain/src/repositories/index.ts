@@ -18,7 +18,7 @@ export interface Repository<T, TId = string> {
  * Toda consulta é filtrada por tenantId automaticamente.
  */
 export interface TenantRepository<T, TId = string> extends Repository<T, TId> {
-  findById(id: TId, tenantId: string): Promise<T | null>;
+  findById(id: TId, tenantId?: string): Promise<T | null>;
 }
 
 /**
@@ -51,3 +51,5 @@ export interface SoftDeleteRepository<T, TId = string> extends Repository<T, TId
   restore(id: TId): Promise<void>;
   findDeleted(tenantId: string): Promise<T[]>;
 }
+
+export * from './tender.repository';
