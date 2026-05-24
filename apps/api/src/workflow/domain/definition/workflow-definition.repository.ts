@@ -1,6 +1,6 @@
 import { WorkflowDefinitionEntity } from './workflow-definition.entity';
 
-export interface DefinitionFilter {
+export abstract class DefinitionFilter {
   tenantId: string;
   entityType?: string;
   isActive?: boolean;
@@ -10,12 +10,12 @@ export interface DefinitionFilter {
   sort?: string;
 }
 
-export interface WorkflowDefinitionRepository {
-  save(definition: WorkflowDefinitionEntity): Promise<void>;
-  findById(id: string): Promise<WorkflowDefinitionEntity | null>;
-  findBySlug(slug: string, tenantId: string): Promise<WorkflowDefinitionEntity | null>;
-  findMany(filter: DefinitionFilter): Promise<WorkflowDefinitionEntity[]>;
-  findByEntityType(entityType: string, tenantId: string): Promise<WorkflowDefinitionEntity[]>;
-  count(filter: DefinitionFilter): Promise<number>;
-  delete(id: string): Promise<void>;
+export abstract class WorkflowDefinitionRepository {
+  abstract save(definition: WorkflowDefinitionEntity): Promise<void>;
+  abstract findById(id: string): Promise<WorkflowDefinitionEntity | null>;
+  abstract findBySlug(slug: string, tenantId: string): Promise<WorkflowDefinitionEntity | null>;
+  abstract findMany(filter: DefinitionFilter): Promise<WorkflowDefinitionEntity[]>;
+  abstract findByEntityType(entityType: string, tenantId: string): Promise<WorkflowDefinitionEntity[]>;
+  abstract count(filter: DefinitionFilter): Promise<number>;
+  abstract delete(id: string): Promise<void>;
 }

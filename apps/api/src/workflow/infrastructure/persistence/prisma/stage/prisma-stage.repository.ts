@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { StageRepository } from '../../../../domain/stage/stage.repository';
 import { StageEntity } from '../../../../domain/stage/stage.entity';
 import { WorkflowDefinitionMapper } from '../../mappers';
@@ -31,7 +31,7 @@ export class PrismaStageRepository implements StageRepository {
       where: { workflowDefinitionId: definitionId },
       orderBy: { order: 'asc' },
     });
-    return records.map(r => this.mapper.stageToDomain(r));
+    return records.map((r: any) => this.mapper.stageToDomain(r));
   }
 
   async findInitialStage(definitionId: string): Promise<StageEntity | null> {

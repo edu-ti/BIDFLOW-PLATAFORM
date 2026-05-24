@@ -209,5 +209,10 @@ export class TenderDispute extends Entity<string> {
     }
     this._status = 'EXTENDED';
     this._extensions += 1;
+    
+    if (this._closedAt) {
+      // Add extensionTime in seconds to closedAt
+      this._closedAt = new Date(this._closedAt.getTime() + this._extensionTime * 1000);
+    }
   }
 }

@@ -33,7 +33,7 @@ describe('Workflow Security — Tenant Isolation', () => {
       .get('/api/v1/workflow/definitions')
       .set('Authorization', `Bearer ${tenantB.token}`);
     expect(listB.status).toBe(200);
-    const slugsB = (listB.body.data || listB.body).map(d => d.slug);
+    const slugsB = (listB.body.data || listB.body).map((d: any) => d.slug);
     expect(slugsB).not.toContain('secreto-a');
   });
 

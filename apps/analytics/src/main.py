@@ -3,14 +3,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import asyncio
 from app.database import init_db
 from app.routers import analytics, auctions, bids, dashboard
-
+from consumers.tender_events_consumer import consumer_instance
+from analytics.bid_processor import bid_stream_processor
+from fastapi import Header, HTTPException
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Start RabbitMQ Consumer in background
+    consumer_task = asyncio.create_task(consumer_instance.start_consuming())
     yield
+    # Graceful shutdown
+    consumer_task.cancel()
+    await consumer_instance.stop()
 
 
 app = FastAPI(
@@ -37,6 +45,15 @@ app.include_router(dashboard.router, prefix="/api/v1/analytics/dashboard", tags=
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "analytics"}
+
+
+@app.get("/analytics/tenders/{tender_id}/behavior", tags=["Tender Behavior"])
+async def get_tender_behavior(tender_id: str, x_tenant_id: str = Header(None, alias="X-Tenant-ID")):
+    if not x_tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID header is required")
+        
+    metrics = bid_stream_processor.get_behavior_analytics(tenant_id=x_tenant_id, tender_id=tender_id)
+    return metrics
 
 
 if __name__ == "__main__":

@@ -79,3 +79,4 @@ export class MaxRetriesExceededException extends BusinessRuleException {
 export class RateLimitException extends DomainException {
   constructor() { super('Too many requests', 'RATE_LIMITED', 429); }
 }
+export * from './supplier-not-found.exception';

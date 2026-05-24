@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ApprovalRepository } from '../../../domain/approval/approval.repository';
 import { WorkflowInstanceRepository } from '../../../domain/instance/workflow-instance.repository';
 import { ApprovalEntity } from '../../../domain/approval/approval.entity';

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { WorkflowInstanceRepository, InstanceFilter } from '../../../../domain/instance/workflow-instance.repository';
 import { WorkflowInstanceEntity } from '../../../../domain/instance/workflow-instance.entity';
 import { WorkflowInstanceMapper } from '../../mappers';
@@ -42,7 +42,7 @@ export class PrismaWorkflowInstanceRepository implements WorkflowInstanceReposit
       skip: ((filter.page ?? 1) - 1) * (filter.limit ?? 50),
       take: filter.limit ?? 50,
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async count(filter: InstanceFilter): Promise<number> {
@@ -77,14 +77,14 @@ export class PrismaWorkflowInstanceRepository implements WorkflowInstanceReposit
       },
       orderBy: { deadlineAt: 'asc' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async findActiveByDefinition(definitionId: string, tenantId: string): Promise<WorkflowInstanceEntity[]> {
     const records = await this.prisma.workflowInstance.findMany({
       where: { workflowDefinitionId: definitionId, tenantId, status: InstanceStatus.ACTIVE },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async countActiveByDefinition(definitionId: string, tenantId: string): Promise<number> {
@@ -97,6 +97,6 @@ export class PrismaWorkflowInstanceRepository implements WorkflowInstanceReposit
     const records = await this.prisma.workflowInstance.findMany({
       where: { assignedTo: userId, tenantId, status: InstanceStatus.ACTIVE },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 }

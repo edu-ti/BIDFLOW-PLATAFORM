@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { StageEntity, CreateStageProps } from '../../../../src/workflow/domain/stage/stage.entity';
 import { TransitionEntity } from '../../../../src/workflow/domain/transition/transition.entity';
-import { StageType } from '../../../../src/workflow/domain/common/enums';
+import { StageType, ApprovalMode } from '../../../../src/workflow/domain/common/enums';
 import { ApprovalConfig } from '../../../../src/workflow/domain/common/value-objects/approval-config';
 import { AssignmentConfig } from '../../../../src/workflow/domain/common/value-objects/assignment-config';
 
@@ -28,14 +28,14 @@ describe('StageEntity — Domain', () => {
     const s = StageEntity.create({
       workflowDefinitionId: defId, slug: 'aprov', name: 'Aprovação', order: 1,
       type: StageType.APPROVAL, isInitial: false, isFinal: false,
-      approvalConfig: { mode: 'ANY', requiredApprovals: 1, allowSelfApproval: false, canDelegate: true },
+      approvalConfig: { mode: ApprovalMode.ANY, requiredApprovals: 1, allowSelfApproval: false, canDelegate: true },
     });
     expect(s.isApprovalStage()).toBe(true);
     expect(s.approvalConfig).toBeInstanceOf(ApprovalConfig);
   });
 
   it('isApprovalStage() retorna true apenas para APPROVAL', () => {
-    const approval = StageEntity.create({ workflowDefinitionId: defId, slug: 'a', name: 'A', order: 1, type: StageType.APPROVAL, isInitial: false, isFinal: false, approvalConfig: { mode: 'ANY', requiredApprovals: 1, allowSelfApproval: true, canDelegate: true } });
+    const approval = StageEntity.create({ workflowDefinitionId: defId, slug: 'a', name: 'A', order: 1, type: StageType.APPROVAL, isInitial: false, isFinal: false, approvalConfig: { mode: ApprovalMode.ANY, requiredApprovals: 1, allowSelfApproval: true, canDelegate: true } });
     const standard = StageEntity.create({ workflowDefinitionId: defId, slug: 's', name: 'S', order: 1, type: StageType.STANDARD, isInitial: false, isFinal: false });
     expect(approval.isApprovalStage()).toBe(true);
     expect(standard.isApprovalStage()).toBe(false);

@@ -1,11 +1,11 @@
-import { WorkflowInstanceRepository } from '../../../../domain/instance/workflow-instance.repository';
-import { ApprovalRepository } from '../../../../domain/approval/approval.repository';
-import { WorkflowTaskRepository } from '../../../../domain/task/workflow-task.repository';
-import { WorkflowTimelineEntryRepository } from '../../../../domain/timeline/workflow-timeline-entry.repository';
-import { GetInstanceQuery, ListInstancesQuery, GetInstanceTimelineQuery } from '../../../common/queries';
-import { WorkflowInstanceDetailDto, TimelineEntryDto } from '../../../common/dto';
-import { PaginatedResponse } from '../../../common/dto/common.dto';
-import { InstanceStatus } from '../../../../domain/common/enums';
+import { WorkflowInstanceRepository } from '../../../domain/instance/workflow-instance.repository';
+import { ApprovalRepository } from '../../../domain/approval/approval.repository';
+import { WorkflowTaskRepository } from '../../../domain/task/workflow-task.repository';
+import { WorkflowTimelineEntryRepository } from '../../../domain/timeline/workflow-timeline-entry.repository';
+import { GetInstanceQuery, ListInstancesQuery, GetInstanceTimelineQuery } from '../../common/queries';
+import { WorkflowInstanceDetailDto, TimelineEntryDto } from '../../common/dto';
+import { PaginatedResponse } from '../../common/dto/common.dto';
+import { InstanceStatus } from '../../../domain/common/enums';
 
 export class GetInstanceHandler {
   constructor(

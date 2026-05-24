@@ -17,6 +17,16 @@ import {
   TenderDisputeBidProps,
   DisputeStatus,
 } from '../../../../../../../../packages/domain/src/tenders/entities/tender-dispute.entity';
+import {
+  TenderDocument,
+  TenderDocumentProps,
+  DocumentStatus,
+} from '../../../../../../../../packages/domain/src/tenders/entities/tender-document.entity';
+import {
+  ChecklistRequirement,
+  ChecklistRequirementProps,
+  TenderDocumentType,
+} from '../../../../../../../../packages/domain/src/tenders/value-objects/checklist-requirement.vo';
 
 export class TenderMapper {
   toDomain(raw: any): Tender {
@@ -127,6 +137,38 @@ export class TenderMapper {
       (tender as any)._dispute = dispute;
     }
 
+    if (raw.documents && Array.isArray(raw.documents)) {
+      const documents = raw.documents.map((d: any) => {
+        const docProps: TenderDocumentProps = {
+          id: d.id,
+          tenantId: d.tenantId,
+          tenderId: d.tenderId,
+          type: d.type as TenderDocumentType,
+          title: d.title,
+          fileUrl: d.fileUrl,
+          expiresAt: d.expiresAt,
+          status: d.status as DocumentStatus,
+          metadata: d.metadata,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+        };
+        return new TenderDocument(docProps);
+      });
+      (tender as any)._documents = documents;
+    }
+
+    if (raw.checklist && Array.isArray(raw.checklist)) {
+      const checklist = raw.checklist.map((c: any) => {
+        const checkProps: ChecklistRequirementProps = {
+          documentType: c.documentType as TenderDocumentType,
+          isRequired: c.isRequired,
+          description: c.description,
+        };
+        return new ChecklistRequirement(checkProps);
+      });
+      (tender as any)._checklist = checklist;
+    }
+
     return tender;
   }
 
@@ -220,6 +262,32 @@ export class TenderMapper {
       isWinner: bid.isWinner,
       timestamp: bid.timestamp,
       round: bid.round,
+    };
+  }
+
+  documentToPersistence(document: TenderDocument): any {
+    return {
+      id: document.id,
+      tenantId: document.tenantId,
+      tenderId: document.tenderId,
+      type: document.type,
+      title: document.title,
+      fileUrl: document.fileUrl,
+      expiresAt: document.expiresAt,
+      status: document.status,
+      metadata: document.metadata,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    };
+  }
+
+  checklistToPersistence(checklist: ChecklistRequirement, tenderId: string, tenantId: string): any {
+    return {
+      tenantId,
+      tenderId,
+      documentType: checklist.documentType,
+      isRequired: checklist.isRequired,
+      description: checklist.description,
     };
   }
 }

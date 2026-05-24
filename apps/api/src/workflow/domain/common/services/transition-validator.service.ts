@@ -1,10 +1,10 @@
-import { TransitionEntity } from '../transition/transition.entity';
-import { WorkflowInstanceEntity } from '../instance/workflow-instance.entity';
-import { StageEntity } from '../stage/stage.entity';
-import { WorkflowTaskEntity } from '../task/workflow-task.entity';
-import { ApprovalEntity } from '../approval/approval.entity';
-import { InstanceStatus, TaskStatus, ApprovalStatus } from '../common/enums';
-import { InvalidTransitionError, TransitionNotAllowedError, ApprovalPendingError, MandatoryTasksPendingError } from '../common/errors';
+import { TransitionEntity } from '../../transition/transition.entity';
+import { WorkflowInstanceEntity } from '../../instance/workflow-instance.entity';
+import { StageEntity } from '../../stage/stage.entity';
+import { WorkflowTaskEntity } from '../../task/workflow-task.entity';
+import { ApprovalEntity } from '../../approval/approval.entity';
+import { InstanceStatus, TaskStatus, ApprovalStatus } from '../../common/enums';
+import { InvalidTransitionError, TransitionNotAllowedError, ApprovalPendingError, MandatoryTasksPendingError } from '../../common/errors';
 
 export interface TransitionValidationResult {
   valid: boolean;

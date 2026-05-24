@@ -1,4 +1,4 @@
-import { DomainEvent } from '../../domain/common/domain-event';
+import { DomainEvent } from '../domain/common/domain-event';
 
 export class WorkflowStartedEvent extends DomainEvent {
   readonly type = 'com.bidflow.workflow.instance.started.v1';

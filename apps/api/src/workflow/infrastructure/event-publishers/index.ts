@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DomainEvent } from '../../../domain/common/domain-event';
+import { DomainEvent } from '../../domain/common/domain-event';
 
 export interface IEventPublisher {
   publish(event: DomainEvent): Promise<void>;

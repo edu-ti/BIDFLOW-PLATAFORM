@@ -12,3 +12,4 @@ export * from './value-objects';
 export * from './observability';
 export * from './types';
 export * from './tenders';
+export * from './suppliers';  

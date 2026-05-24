@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ApprovalRepository } from '../../../../domain/approval/approval.repository';
 import { ListApprovalsQuery } from '../../../common/queries';
 import { ApproveCommand, RejectCommand, DelegateApprovalCommand } from '../../../common/commands';

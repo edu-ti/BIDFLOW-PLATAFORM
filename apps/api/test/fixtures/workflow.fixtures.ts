@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { StageType, InstancePriority, InstanceStatus, ApprovalMode, TaskType } from '../../../../src/workflow/domain/common/enums';
+import { StageType, InstancePriority, InstanceStatus, ApprovalMode, TaskType } from '../../src/workflow/domain/common/enums';
 
 export const tenantAId = randomUUID();
 export const tenantBId = randomUUID();

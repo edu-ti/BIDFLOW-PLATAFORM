@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { WorkflowAssignmentRepository } from '../../../../domain/assignment/workflow-assignment.repository';
 import { WorkflowAssignmentEntity } from '../../../../domain/assignment/workflow-assignment.entity';
 import { AssignmentMapper } from '../../mappers';
@@ -23,14 +23,14 @@ export class PrismaWorkflowAssignmentRepository implements WorkflowAssignmentRep
     const records = await this.prisma.workflowAssignment.findMany({
       where: { workflowInstanceId: instanceId },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async findActiveByUser(userId: string, tenantId: string): Promise<WorkflowAssignmentEntity[]> {
     const records = await this.prisma.workflowAssignment.findMany({
       where: { userId, tenantId, status: 'ACTIVE' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async delete(id: string): Promise<void> {

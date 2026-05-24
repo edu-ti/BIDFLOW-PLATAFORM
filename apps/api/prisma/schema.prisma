@@ -1,10 +1,12 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  extensions = [vector]
 }
 
 model User {
@@ -1083,6 +1085,8 @@ model Tender {
   createdBy          String         @map("created_by")
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
+  // 🧩 LINK PARA O EMBEDDING
+  embedding       TenderEmbedding?
 
   items           TenderItem[]
   documents       TenderDocument[]
@@ -1362,4 +1366,69 @@ model TenderTimelineEntry {
   @@index([tenderId, occurredAt])
   @@index([tenderId, type])
   @@map("tender_timeline_entries")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI — TENDER EMBEDDINGS (pgvector)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model TenderEmbedding {
+  id        String                    @id @default(uuid()) @map("id")
+  tenderId  String                    @unique @map("tender_id")
+  // Armazena o vetor de 768 dimensões (padrão de modelos locais como o nomic-embed-text do Ollama)
+  embedding Unsupported("vector(768)") @map("embedding")
+  createdAt DateTime                  @default(now()) @map("created_at")
+
+  tender    Tender                    @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@map("tender_embeddings")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPPLIERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Supplier {
+  id              String   @id @default(uuid()) @map("id")
+  tenantId        String   @map("tenant_id")
+  corporateName   String   @map("corporate_name") @db.VarChar(255)
+  tradeName       String?  @map("trade_name") @db.VarChar(255)
+  cnpj            String   @map("cnpj") @db.VarChar(14)
+  status          String   @default("ACTIVE") @map("status")
+  complianceScore Int      @default(100) @map("compliance_score")
+  metadata        Json     @default("{}") @map("metadata")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, cnpj])
+  @@index([tenantId, status])
+  @@map("suppliers")
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTIFICATIONS SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Notification {
+  id        String   @id @default(uuid()) @map("id")
+  tenantId  String   @map("tenant_id")
+  level     String   @map("level") // INFO, WARNING, CRITICAL
+  message   String   @map("message") @db.Text
+  isRead    Boolean  @default(false) @map("is_read")
+  metadata  Json?    @default("{}") @map("metadata")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId, isRead, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("notifications")
+}
+
+model TenantPreference {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id")
+  description String   // Descreve o que o cliente vende (Ex: "Serviços de suporte técnico de informática e redes")
+  embedding   Unsupported("vector(768)") // O vetor gerado pela IA para o perfil do cliente
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("tenant_preferences")
 }

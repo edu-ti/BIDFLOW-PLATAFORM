@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+    <head>
+        <meta charset="UTF-8">
+        <title>BidFlow V2 - WebSocket Cockpit</title>
+        <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: #0f172a;
+                color: #e2e8f0;
+                padding: 20px;
+            }
+
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+            }
+
+            .card {
+                background: #1e293b;
+                padding: 20px;
+                border-radius: 8px;
+                border: 1px solid #334155;
+                margin-bottom: 20px;
+            }
+
+            input,
+            button {
+                padding: 10px;
+                border-radius: 4px;
+                border: 1px solid #475569;
+                background: #0f172a;
+                color: white;
+                width: 100%;
+                box-sizing: border-box;
+                margin-bottom: 10px;
+            }
+
+            button {
+                background: #2563eb;
+                cursor: pointer;
+                font-weight: bold;
+                border: none;
+            }
+
+            button:hover {
+                background: #1d4ed8;
+            }
+
+            .badge {
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            .CRITICAL {
+                background: #ef4444;
+            }
+
+            .WARNING {
+                background: #f59e0b;
+            }
+
+            .INFO {
+                background: #3b82f6;
+            }
+
+            #log {
+                max-height: 400px;
+                overflow-y: auto;
+                background: #020617;
+                pading: 15px;
+                border-radius: 6px;
+                padding: 15px;
+                font-family: monospace;
+            }
+
+            .msg {
+                border-left: 4px solid #475569;
+                padding-left: 10px;
+                margin-bottom: 10px;
+                padding-bottom: 5px;
+                border-bottom: 1px solid #1e293b;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <h2>⚡ BidFlow Real-Time Cockpit</h2>
+
+            <div class="card">
+                <h3>🔑 Autenticação Multi-Tenant</h3>
+                <label for="token">Insira o Token JWT (gerado para o Tenant):</label>
+                <input type="text" id="token" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+                <button onclick="connectWebSocket()">Conectar ao Canal Vivo</button>
+                <p id="status" style="color: #94a3b8; font-size: 14px; margin-top: 10px;">Status: Desconectado</p>
+            </div>
+
+            <div class="card">
+                <h3>🔔 Painel de Alertas Coletados</h3>
+                <div id="log">Aguardando conexão e disparos de eventos...</div>
+            </div>
+        </div>
+
+        <script>
+            let socket;
+
+            function connectWebSocket() {
+                const token = document.getElementById('token').value.trim();
+                const statusEl = document.getElementById('status');
+                const logEl = document.getElementById('log');
+
+                if (!token) {
+                    alert('Por favor, insira um token JWT válido.');
+                    return;
+                }
+
+                if (socket) socket.disconnect();
+
+                statusEl.innerText = "Status: Tentando conexão...";
+
+                // Inicializa o túnel
+                socket = io('http://localhost:3001', {
+                    auth: { token: token },
+                    transports: ['websocket']
+                });
+
+                socket.on('connect', () => {
+                    statusEl.innerText = `Status: Conectado com sucesso! (ID: ${socket.id})`;
+                    statusEl.style.color = "#10b981";
+                    logEl.innerHTML = "<p style='color: #10b981;'>➔ Túnel estabelecido. Ouvindo qualquer evento da sua sala restrita de Tenant...</p>";
+                });
+
+                // 🕵️‍♂️ ESCUTA CORINGA: Captura qualquer evento vindo do NestJS para matar a charada do nome!
+                socket.onAny((eventName, rawData) => {
+                    console.log(`[WebSocket] Evento recebido: "${eventName}"`, rawData);
+
+                    // Ignora eventos nativos de conexão do socket.io
+                    if (eventName === 'connect' || eventName === 'disconnect' || eventName === 'error') return;
+
+                    // Tratamento preventivo: Extrai os dados se vierem envelopados em .data ou se for o objeto direto
+                    const data = rawData.data || rawData;
+
+                    // Garante que o objeto possui as propriedades necessárias antes de renderizar
+                    const priority = data.priority || 'INFO';
+                    const title = data.title || `Evento: ${eventName}`;
+                    const message = data.message || JSON.stringify(data);
+
+                    const timestamp = new Date().toLocaleTimeString();
+                    const newMsg = document.createElement('div');
+                    newMsg.className = 'msg';
+                    newMsg.innerHTML = `
+                        <p style="margin: 0 0 5px 0;">
+                            <span class="badge ${priority}">${priority}</span> 
+                            <strong style="color: #f8fafc;">${title}</strong> 
+                            <span style="color: #64748b; font-size: 12px; float: right;">${timestamp}</span>
+                        </p>
+                        <p style="margin: 0; color: #94a3b8; font-size: 14px;">${message}</p>
+                    `;
+
+                    // Remove a mensagem de aguardando se for o primeiro alerta
+                    if (logEl.innerText.includes("Aguardando conexão")) {
+                        logEl.innerHTML = "";
+                    }
+
+                    logEl.insertBefore(newMsg, logEl.firstChild);
+                });
+
+                socket.on('connect_error', (error) => {
+                    statusEl.innerText = `Status: Erro na conexão (${error.message})`;
+                    statusEl.style.color = "#ef4444";
+                });
+
+                socket.on('disconnect', () => {
+                    statusEl.innerText = "Status: Desconectado";
+                    statusEl.style.color = "#ef4444";
+                });
+            }
+        </script>
+    </body>
+
+</html>

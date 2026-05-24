@@ -1,10 +1,10 @@
-import { StageEntity } from '../stage/stage.entity';
-import { WorkflowInstanceEntity, CreateInstanceProps } from '../instance/workflow-instance.entity';
-import { WorkflowAssignmentEntity } from '../assignment/workflow-assignment.entity';
-import { ApprovalEntity } from '../approval/approval.entity';
-import { WorkflowTaskEntity } from '../task/workflow-task.entity';
-import { WorkflowTimelineEntryEntity } from '../timeline/workflow-timeline-entry.entity';
-import { ApprovalMode, TaskType, TimelineEntryType, InstancePriority } from '../common/enums';
+import { StageEntity } from '../../stage/stage.entity';
+import { WorkflowInstanceEntity, CreateInstanceProps } from '../../instance/workflow-instance.entity';
+import { WorkflowAssignmentEntity } from '../../assignment/workflow-assignment.entity';
+import { ApprovalEntity } from '../../approval/approval.entity';
+import { WorkflowTaskEntity } from '../../task/workflow-task.entity';
+import { WorkflowTimelineEntryEntity } from '../../timeline/workflow-timeline-entry.entity';
+import { ApprovalMode, TaskType, TimelineEntryType, InstancePriority } from '../../common/enums';
 
 export interface InstanceFactoryResult {
   instance: WorkflowInstanceEntity;

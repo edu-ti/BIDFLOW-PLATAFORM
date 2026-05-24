@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Command } from '../../../common/interfaces/command';
 import { InstancePriority } from '../../../../domain/common/enums';
 

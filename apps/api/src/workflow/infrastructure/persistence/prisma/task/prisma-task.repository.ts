@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { WorkflowTaskRepository } from '../../../../domain/task/workflow-task.repository';
 import { WorkflowTaskEntity } from '../../../../domain/task/workflow-task.entity';
 import { WorkflowTaskMapper } from '../../mappers';
@@ -31,7 +31,7 @@ export class PrismaWorkflowTaskRepository implements WorkflowTaskRepository {
     const records = await this.prisma.workflowTask.findMany({
       where: { workflowInstanceId: instanceId },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async findPendingByUser(userId: string, tenantId: string): Promise<WorkflowTaskEntity[]> {
@@ -39,7 +39,7 @@ export class PrismaWorkflowTaskRepository implements WorkflowTaskRepository {
       where: { assignedTo: userId, tenantId, status: TaskStatus.PENDING },
       orderBy: { dueDate: 'asc' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async countMandatoryPending(instanceId: string): Promise<number> {

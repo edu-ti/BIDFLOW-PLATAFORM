@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { TransitionRepository } from '../../../../domain/transition/transition.repository';
 import { TransitionEntity } from '../../../../domain/transition/transition.entity';
 import { WorkflowDefinitionMapper } from '../../mappers';
@@ -30,14 +30,14 @@ export class PrismaTransitionRepository implements TransitionRepository {
     const records = await this.prisma.workflowTransition.findMany({
       where: { workflowDefinitionId: definitionId },
     });
-    return records.map(r => this.mapper.transitionToDomain(r));
+    return records.map((r: any) => this.mapper.transitionToDomain(r));
   }
 
   async findAvailable(fromStageId: string): Promise<TransitionEntity[]> {
     const records = await this.prisma.workflowTransition.findMany({
       where: { fromStageId },
     });
-    return records.map(r => this.mapper.transitionToDomain(r));
+    return records.map((r: any) => this.mapper.transitionToDomain(r));
   }
 
   async findByAutoTriggerEvent(eventType: string, definitionId: string): Promise<TransitionEntity | null> {

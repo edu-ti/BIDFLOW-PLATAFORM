@@ -1,8 +1,8 @@
 import { WorkflowAssignmentEntity } from './workflow-assignment.entity';
 
-export interface WorkflowAssignmentRepository {
-  save(assignment: WorkflowAssignmentEntity): Promise<void>;
-  findByInstance(instanceId: string): Promise<WorkflowAssignmentEntity[]>;
-  findActiveByUser(userId: string, tenantId: string): Promise<WorkflowAssignmentEntity[]>;
-  delete(id: string): Promise<void>;
+export abstract class WorkflowAssignmentRepository {
+  abstract save(assignment: WorkflowAssignmentEntity): Promise<void>;
+  abstract findByInstance(instanceId: string): Promise<WorkflowAssignmentEntity[]>;
+  abstract findActiveByUser(userId: string, tenantId: string): Promise<WorkflowAssignmentEntity[]>;
+  abstract delete(id: string): Promise<void>;
 }

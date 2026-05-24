@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
-import { WorkflowDefinitionEntity } from '../../../src/workflow/domain/definition/workflow-definition.entity';
-import { StageEntity } from '../../../src/workflow/domain/stage/stage.entity';
-import { TransitionEntity } from '../../../src/workflow/domain/transition/transition.entity';
-import { StageType } from '../../../src/workflow/domain/common/enums';
-import { makeDefinitionProps } from '../../fixtures/workflow.fixtures';
+import { WorkflowDefinitionEntity } from '../../../../src/workflow/domain/definition/workflow-definition.entity';
+import { StageEntity } from '../../../../src/workflow/domain/stage/stage.entity';
+import { TransitionEntity } from '../../../../src/workflow/domain/transition/transition.entity';
+import { StageType, ApprovalMode } from '../../../../src/workflow/domain/common/enums';
+import { makeDefinitionProps } from '../../../fixtures/workflow.fixtures';
 
 describe('Workflow — Regras de Negócio', () => {
   describe('Transições inválidas', () => {
@@ -60,8 +60,8 @@ describe('Workflow — Regras de Negócio', () => {
       const engine = new ApprovalEngine();
       const tenantId = randomUUID(), instanceId = randomUUID(), stageId = randomUUID();
 
-      const a1 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: 'ANY', assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
-      const a2 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: 'ANY', assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
+      const a1 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: ApprovalMode.ANY, assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
+      const a2 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: ApprovalMode.ANY, assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
       a1.approve();
       const result = engine.processDecision(a1, [a1, a2]);
       expect(result.allResolved).toBe(true);
@@ -75,8 +75,8 @@ describe('Workflow — Regras de Negócio', () => {
       const engine = new ApprovalEngine();
       const tenantId = randomUUID(), instanceId = randomUUID(), stageId = randomUUID();
 
-      const a1 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: 'ALL', assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
-      const a2 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: 'ALL', assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
+      const a1 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: ApprovalMode.ALL, assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
+      const a2 = ApprovalEntity.create({ tenantId, workflowInstanceId: instanceId, stageId, approvalMode: ApprovalMode.ALL, assignedTo: randomUUID(), allowSelfApproval: true, canDelegate: true, instanceCreatedBy: randomUUID() });
       a1.approve();
       expect(engine.processDecision(a1, [a1, a2]).allResolved).toBe(false);
       a2.approve();

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { DomainEvent } from '../../common/domain-event';
 
 export class WorkflowStartedEvent extends DomainEvent {

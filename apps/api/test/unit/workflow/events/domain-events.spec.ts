@@ -8,8 +8,8 @@ describe('Workflow Domain Events — Unit', () => {
   it('WorkflowStartedEvent deve ter type correto', () => {
     const e = new WorkflowStartedEvent(aggregateId, tenantId, randomUUID(), 'aprovacao', 1, 'bidding.rfp', randomUUID(), 'RFP #001', 'inicio', randomUUID(), 'HIGH', {}, randomUUID());
     expect(e.type).toBe('com.bidflow.workflow.instance.started.v1');
-    expect(e.tenantId).toBe(tenantId);
-    expect(e.eventId).toBeDefined();
+    expect((e as any).tenantId).toBe(tenantId);
+    expect((e as any).eventId).toBeDefined();
   });
 
   it('StageChangedEvent deve ter from → to', () => {

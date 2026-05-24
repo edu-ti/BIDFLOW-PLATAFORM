@@ -1,7 +1,7 @@
 import { WorkflowInstanceEntity } from './workflow-instance.entity';
 import { InstanceStatus, InstancePriority } from '../common/enums';
 
-export interface InstanceFilter {
+export abstract class InstanceFilter {
   tenantId: string;
   status?: InstanceStatus[];
   workflowDefinitionId?: string;
@@ -17,14 +17,14 @@ export interface InstanceFilter {
   sort?: string;
 }
 
-export interface WorkflowInstanceRepository {
-  save(instance: WorkflowInstanceEntity): Promise<void>;
-  findById(id: string): Promise<WorkflowInstanceEntity | null>;
-  findMany(filter: InstanceFilter): Promise<WorkflowInstanceEntity[]>;
-  count(filter: InstanceFilter): Promise<number>;
-  findByEntity(entityType: string, entityId: string, tenantId: string): Promise<WorkflowInstanceEntity | null>;
-  findOverdue(tenantId: string): Promise<WorkflowInstanceEntity[]>;
-  findActiveByDefinition(definitionId: string, tenantId: string): Promise<WorkflowInstanceEntity[]>;
-  countActiveByDefinition(definitionId: string, tenantId: string): Promise<number>;
-  findByAssignedUser(userId: string, tenantId: string): Promise<WorkflowInstanceEntity[]>;
+export abstract class WorkflowInstanceRepository {
+  abstract save(instance: WorkflowInstanceEntity): Promise<void>;
+  abstract findById(id: string): Promise<WorkflowInstanceEntity | null>;
+  abstract findMany(filter: InstanceFilter): Promise<WorkflowInstanceEntity[]>;
+  abstract count(filter: InstanceFilter): Promise<number>;
+  abstract findByEntity(entityType: string, entityId: string, tenantId: string): Promise<WorkflowInstanceEntity | null>;
+  abstract findOverdue(tenantId: string): Promise<WorkflowInstanceEntity[]>;
+  abstract findActiveByDefinition(definitionId: string, tenantId: string): Promise<WorkflowInstanceEntity[]>;
+  abstract countActiveByDefinition(definitionId: string, tenantId: string): Promise<number>;
+  abstract findByAssignedUser(userId: string, tenantId: string): Promise<WorkflowInstanceEntity[]>;
 }

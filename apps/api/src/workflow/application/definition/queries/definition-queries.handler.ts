@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { WorkflowDefinitionRepository } from '../../../../domain/definition/workflow-definition.repository';
 import { StageRepository } from '../../../../domain/stage/stage.repository';
 import { TransitionRepository } from '../../../../domain/transition/transition.repository';

@@ -2,13 +2,8 @@ import { TenderRepository } from '../../../../../../../packages/domain/src/repos
 import { Tender, TenderSource, TenderModality, TenderType } from '../../../../../../../packages/domain/src/tenders/tender.aggregate';
 import { BusinessRuleException } from '../../../../../../../packages/domain/src/exceptions';
 import { CaptureTenderCommand } from './capture-tender.command';
+import { IEventPublisher } from '../../ports/event-publisher.port';
 import * as crypto from 'crypto';
-
-// Assuming IEventPublisher is available in the infrastructure or events package
-export interface IEventPublisher {
-  publish(event: any): Promise<void>;
-  publishAll(events: any[]): Promise<void>;
-}
 
 export class DuplicateTenderException extends BusinessRuleException {
   constructor(externalId: string) {

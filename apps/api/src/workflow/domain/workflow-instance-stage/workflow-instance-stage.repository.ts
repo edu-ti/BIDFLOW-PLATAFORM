@@ -1,15 +1,15 @@
 import { WorkflowInstanceStageEntity } from './workflow-instance-stage.entity';
 
-export interface InstanceStageFilter {
+export abstract class InstanceStageFilter {
   workflowInstanceId: string;
   tenantId?: string;
   stageId?: string;
 }
 
-export interface WorkflowInstanceStageRepository {
-  save(stage: WorkflowInstanceStageEntity): Promise<void>;
-  findById(id: string): Promise<WorkflowInstanceStageEntity | null>;
-  findByInstance(instanceId: string): Promise<WorkflowInstanceStageEntity[]>;
-  findActiveByInstance(instanceId: string): Promise<WorkflowInstanceStageEntity | null>;
-  findByInstanceAndStage(instanceId: string, stageId: string): Promise<WorkflowInstanceStageEntity | null>;
+export abstract class WorkflowInstanceStageRepository {
+  abstract save(stage: WorkflowInstanceStageEntity): Promise<void>;
+  abstract findById(id: string): Promise<WorkflowInstanceStageEntity | null>;
+  abstract findByInstance(instanceId: string): Promise<WorkflowInstanceStageEntity[]>;
+  abstract findActiveByInstance(instanceId: string): Promise<WorkflowInstanceStageEntity | null>;
+  abstract findByInstanceAndStage(instanceId: string, stageId: string): Promise<WorkflowInstanceStageEntity | null>;
 }

@@ -27,7 +27,7 @@ export abstract class ValueObject {
   equals(other: this): boolean {
     if (other === null || other === undefined) return false;
     if (other.constructor !== this.constructor) return false;
-    return deepEqual(this, other);
+    return deepEqual(this as unknown as Record<string, unknown>, other as unknown as Record<string, unknown>);
   }
 }
 

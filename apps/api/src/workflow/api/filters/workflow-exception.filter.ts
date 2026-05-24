@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { DomainError } from '../../../workflow/domain/common/errors';

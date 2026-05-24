@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { TransitionLogRepository } from '../../../../domain/transition-log/transition-log.repository';
 import { TransitionLogEntity } from '../../../../domain/transition-log/transition-log.entity';
 import { TransitionLogMapper } from '../../mappers';
@@ -22,7 +22,7 @@ export class PrismaTransitionLogRepository implements TransitionLogRepository {
       where: { workflowInstanceId: instanceId },
       orderBy: { executedAt: 'asc' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async countByInstance(instanceId: string): Promise<number> {

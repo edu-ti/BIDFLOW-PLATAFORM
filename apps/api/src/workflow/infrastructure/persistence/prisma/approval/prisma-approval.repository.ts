@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
+import { PrismaService } from '../../../../../prisma/prisma.service';
 import { ApprovalRepository } from '../../../../domain/approval/approval.repository';
 import { ApprovalEntity } from '../../../../domain/approval/approval.entity';
 import { ApprovalMapper } from '../../mappers';
@@ -32,7 +32,7 @@ export class PrismaApprovalRepository implements ApprovalRepository {
       where: { workflowInstanceId: instanceId },
       orderBy: { order: 'asc' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async findPendingByUser(userId: string, tenantId: string): Promise<ApprovalEntity[]> {
@@ -47,14 +47,14 @@ export class PrismaApprovalRepository implements ApprovalRepository {
       },
       orderBy: { deadlineAt: 'asc' },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async findPendingByStage(instanceId: string, stageId: string): Promise<ApprovalEntity[]> {
     const records = await this.prisma.workflowApproval.findMany({
       where: { workflowInstanceId: instanceId, stageId, status: ApprovalStatus.PENDING },
     });
-    return records.map(r => this.mapper.toDomain(r));
+    return records.map((r: any) => this.mapper.toDomain(r));
   }
 
   async countPendingByInstance(instanceId: string): Promise<number> {

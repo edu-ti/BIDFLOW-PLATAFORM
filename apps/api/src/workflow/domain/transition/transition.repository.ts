@@ -1,10 +1,10 @@
 import { TransitionEntity } from './transition.entity';
 
-export interface TransitionRepository {
-  save(transition: TransitionEntity): Promise<void>;
-  findById(id: string): Promise<TransitionEntity | null>;
-  findByDefinition(definitionId: string): Promise<TransitionEntity[]>;
-  findAvailable(fromStageId: string): Promise<TransitionEntity[]>;
-  findByAutoTriggerEvent(eventType: string, definitionId: string): Promise<TransitionEntity | null>;
-  delete(id: string): Promise<void>;
+export abstract class TransitionRepository {
+  abstract save(transition: TransitionEntity): Promise<void>;
+  abstract findById(id: string): Promise<TransitionEntity | null>;
+  abstract findByDefinition(definitionId: string): Promise<TransitionEntity[]>;
+  abstract findAvailable(fromStageId: string): Promise<TransitionEntity[]>;
+  abstract findByAutoTriggerEvent(eventType: string, definitionId: string): Promise<TransitionEntity | null>;
+  abstract delete(id: string): Promise<void>;
 }

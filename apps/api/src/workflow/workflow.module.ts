@@ -9,6 +9,7 @@ import { DashboardController } from './api/controllers/dashboard.controller';
 import { WorkflowPermissionGuard } from './api/guards/workflow-permission.guard';
 import { WorkflowExceptionFilter } from './api/filters/workflow-exception.filter';
 import { WorkflowLoggingInterceptor } from './api/interceptors/workflow-logging.interceptor';
+import { TenderEventsConsumer } from './api/consumers/tender-events.consumer';
 
 // ── Application Layer ──
 import { CreateDefinitionHandler, UpdateDefinitionHandler, PublishDefinitionHandler, CreateDefinitionVersionHandler, DeleteDefinitionHandler } from './application/definition/commands';
@@ -45,6 +46,7 @@ const controllers = [
   DefinitionsController, StagesController, TransitionsController,
   InstancesController, ApprovalsController, TasksController, TimelineController,
   DashboardController,
+  TenderEventsConsumer,
 ];
 
 const repositories = [

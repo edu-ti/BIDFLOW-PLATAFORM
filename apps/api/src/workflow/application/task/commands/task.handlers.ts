@@ -1,8 +1,8 @@
-import { WorkflowTaskRepository } from '../../../../domain/task/workflow-task.repository';
-import { WorkflowTaskEntity } from '../../../../domain/task/workflow-task.entity';
-import { CompleteTaskCommand } from '../../../common/commands';
-import { ListTasksQuery, ListMyPendingTasksQuery } from '../../../common/queries';
-import { TaskResponseDto } from '../../../common/dto';
+import { WorkflowTaskRepository } from '../../../domain/task/workflow-task.repository';
+import { WorkflowTaskEntity } from '../../../domain/task/workflow-task.entity';
+import { CompleteTaskCommand } from '../../common/commands';
+import { ListTasksQuery, ListMyPendingTasksQuery } from '../../common/queries';
+import { TaskResponseDto } from '../../common/dto';
 
 export class CompleteTaskHandler {
   constructor(private readonly taskRepo: WorkflowTaskRepository) {}

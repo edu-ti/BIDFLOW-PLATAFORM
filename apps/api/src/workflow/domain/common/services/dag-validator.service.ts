@@ -1,4 +1,4 @@
-import { WorkflowDefinitionEntity } from '../definition/workflow-definition.entity';
+import { WorkflowDefinitionEntity } from '../../definition/workflow-definition.entity';
 
 export interface ValidationResult {
   valid: boolean;
@@ -19,7 +19,7 @@ export class DagValidatorService {
       errors.push('Workflow must have at least one final stage');
     }
 
-    const orders = definition.stages.map(s => s.order).sort((a, b) => a - b);
+    const orders = definition.stages.map(s => s.order).sort((a: any, b: any) => a - b);
     for (let i = 0; i < orders.length; i++) {
       if (orders[i] !== i + 1) {
         errors.push(`Stage orders must be sequential: missing order ${i + 1}`);

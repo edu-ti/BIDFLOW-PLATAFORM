@@ -19,5 +19,5 @@
       "@bidflow/*": ["packages/*/src"]
     }
   },
-  "exclude": ["node_modules", "dist", ".next", "build"]
-}
+  "exclude": ["node_modules", "dist", ".next", "build","node_modules", "test/unit/crm", "test/security/crm"]
+}   

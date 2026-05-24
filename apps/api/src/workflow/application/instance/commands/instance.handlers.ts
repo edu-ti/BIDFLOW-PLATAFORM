@@ -1,10 +1,10 @@
-import { WorkflowInstanceRepository } from '../../../../domain/instance/workflow-instance.repository';
-import { WorkflowDefinitionRepository } from '../../../../domain/definition/workflow-definition.repository';
-import { StageRepository } from '../../../../domain/stage/stage.repository';
-import { CreateInstanceCommand, ExecuteTransitionCommand, CancelInstanceCommand, ReassignInstanceCommand } from '../../../common/commands';
-import { InstanceOrchestrationService } from '../../../common/services/instance-orchestration.service';
-import { WorkflowInstanceResponseDto, WorkflowInstanceDetailDto } from '../../../common/dto';
-import { FactoryParams } from '../../../../domain/common/services/instance-factory.service';
+import { WorkflowInstanceRepository } from '../../../domain/instance/workflow-instance.repository';
+import { WorkflowDefinitionRepository } from '../../../domain/definition/workflow-definition.repository';
+import { StageRepository } from '../../../domain/stage/stage.repository';
+import { CreateInstanceCommand, ExecuteTransitionCommand, CancelInstanceCommand, ReassignInstanceCommand } from '../../common/commands';
+import { InstanceOrchestrationService } from '../../common/services/instance-orchestration.service';
+import { WorkflowInstanceResponseDto, WorkflowInstanceDetailDto } from '../../common/dto';
+import { FactoryParams } from '../../../domain/common/services/instance-factory.service';
 
 export class CreateInstanceHandler {
   constructor(

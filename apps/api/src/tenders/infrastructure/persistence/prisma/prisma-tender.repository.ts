@@ -21,6 +21,8 @@ export class PrismaTenderRepository implements TenderRepository {
     const itemsData = tender.items.map((i) => this.mapper.itemToPersistence(i));
     const disputeData = tender.dispute ? this.mapper.disputeToPersistence(tender.dispute) : null;
     const bidsData = tender.dispute ? tender.dispute.bids.map((b) => this.mapper.disputeBidToPersistence(b)) : [];
+    const documentsData = tender.documents.map((d) => this.mapper.documentToPersistence(d));
+    const checklistData = tender.checklist.map((c) => this.mapper.checklistToPersistence(c, tender.id, tender.tenantId));
 
     await this.prisma.$transaction(async (tx: any) => {
       // Upsert do Aggregate Root
@@ -37,6 +39,22 @@ export class PrismaTenderRepository implements TenderRepository {
       });
       if (itemsData.length > 0) {
         await tx.tenderItem.createMany({ data: itemsData });
+      }
+
+      // Sincronização dos Documentos
+      await tx.tenderDocument.deleteMany({
+        where: { tenderId: tender.id, tenantId: tender.tenantId },
+      });
+      if (documentsData.length > 0) {
+        await tx.tenderDocument.createMany({ data: documentsData });
+      }
+
+      // Sincronização do Checklist
+      await tx.tenderChecklistRequirement.deleteMany({
+        where: { tenderId: tender.id, tenantId: tender.tenantId },
+      });
+      if (checklistData.length > 0) {
+        await tx.tenderChecklistRequirement.createMany({ data: checklistData });
       }
 
       // Sincronização do Dispute e seus Bids
@@ -72,6 +90,8 @@ export class PrismaTenderRepository implements TenderRepository {
       where,
       include: {
         items: true,
+        documents: true,
+        checklists: true,
         dispute: {
           include: {
             bids: true,
@@ -114,6 +134,8 @@ export class PrismaTenderRepository implements TenderRepository {
       where: { tenantId, deletedAt: { not: null } },
       include: {
         items: true,
+        documents: true,
+        checklists: true,
         dispute: { include: { bids: true } },
       },
     });
@@ -125,6 +147,8 @@ export class PrismaTenderRepository implements TenderRepository {
       where: { externalId, tenantId, deletedAt: null },
       include: {
         items: true,
+        documents: true,
+        checklists: true,
         dispute: { include: { bids: true } },
       },
     });
@@ -169,6 +193,8 @@ export class PrismaTenderRepository implements TenderRepository {
         orderBy,
         include: {
           items: true,
+          documents: true,
+          checklists: true,
           dispute: { include: { bids: true } },
         },
       }),

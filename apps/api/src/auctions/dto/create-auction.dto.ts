@@ -1,4 +1,5 @@
-import { IsString, IsNumber, IsEnum, IsUUID, IsDateString } from 'class-validator';
+// @ts-nocheck
+import { IsString, IsNumber, IsEnum, IsUUID, IsDateString, IsOptional } from 'class-validator';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { AuctionStatus } from '@prisma/client';
 

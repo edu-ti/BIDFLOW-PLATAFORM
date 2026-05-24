@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../../../prisma/prisma.service';
-import { WorkflowDefinitionRepository, DefinitionFilter } from '../../../domain/definition/workflow-definition.repository';
-import { WorkflowDefinitionEntity } from '../../../domain/definition/workflow-definition.entity';
+import { PrismaService } from '../../../../../prisma/prisma.service';
+import { WorkflowDefinitionRepository, DefinitionFilter } from '../../../../domain/definition/workflow-definition.repository';
+import { WorkflowDefinitionEntity } from '../../../../domain/definition/workflow-definition.entity';
 import { WorkflowDefinitionMapper } from '../../mappers';
-import { WorkflowDefinitionNotFoundError } from '../../../domain/common/errors';
+import { WorkflowDefinitionNotFoundError } from '../../../../domain/common/errors';
 
 @Injectable()
 export class PrismaWorkflowDefinitionRepository implements WorkflowDefinitionRepository {
@@ -57,14 +57,14 @@ export class PrismaWorkflowDefinitionRepository implements WorkflowDefinitionRep
       skip: ((filter.page ?? 1) - 1) * (filter.limit ?? 20),
       take: filter.limit ?? 20,
     });
-    return records.map(r => this.mapper.toDomain({ ...r, stages: [], transitions: [] }));
+    return records.map((r: any) => this.mapper.toDomain({ ...r, stages: [], transitions: [] }));
   }
 
   async findByEntityType(entityType: string, tenantId: string): Promise<WorkflowDefinitionEntity[]> {
     const records = await this.prisma.workflowDefinition.findMany({
       where: { entityType, tenantId, isActive: true },
     });
-    return records.map(r => this.mapper.toDomain({ ...r, stages: [], transitions: [] }));
+    return records.map((r: any) => this.mapper.toDomain({ ...r, stages: [], transitions: [] }));
   }
 
   async count(filter: DefinitionFilter): Promise<number> {

@@ -34,10 +34,10 @@ export class RabbitMqWorkflowEventPublisher implements IWorkflowEventPublisher {
   }
 
   async publishWorkflowCompleted(event: WorkflowCompletedEvent): Promise<void> {
-    await this.publish(event, this.routingKey(event.tenantId, event.type));
+    await this.publish(event, this.routingKey((event as any).tenantId, event.type));
   }
 
   async publishTaskAssigned(event: TaskAssignedEvent): Promise<void> {
-    await this.publish(event, this.routingKey(event.tenantId, event.type));
+    await this.publish(event, this.routingKey((event as any).tenantId, event.type));
   }
 }

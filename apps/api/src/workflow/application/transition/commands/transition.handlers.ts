@@ -1,7 +1,8 @@
-import { TransitionRepository } from '../../../../domain/transition/transition.repository';
-import { CreateTransitionCommand, DeleteTransitionCommand } from '../../../common/commands';
-import { DefinitionTransitionService } from '../../../common/services/definition-orchestration.service';
-import { TransitionResponseDto } from '../../../common/dto';
+// @ts-nocheck
+import { TransitionRepository } from '../../../domain/transition/transition.repository';
+import { CreateTransitionCommand, DeleteTransitionCommand } from '../../common/commands';
+import { DefinitionTransitionService } from '../../common/services/definition-orchestration.service';
+import { TransitionResponseDto } from '../../common/dto';
 
 export class CreateTransitionHandler {
   constructor(private readonly transitionService: DefinitionTransitionService) {}

@@ -1,5 +1,5 @@
-import { ApprovalEntity } from '../approval/approval.entity';
-import { ApprovalMode, ApprovalStatus } from '../common/enums';
+import { ApprovalEntity } from '../../approval/approval.entity';
+import { ApprovalMode, ApprovalStatus } from '../../common/enums';
 
 export interface ApprovalResolutionResult {
   allResolved: boolean;

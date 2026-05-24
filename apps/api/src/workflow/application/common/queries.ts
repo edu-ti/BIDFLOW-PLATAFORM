@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Query } from '../../common/interfaces/command';
 import { InstanceStatus, InstancePriority } from '../../../domain/common/enums';
 

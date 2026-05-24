@@ -75,4 +75,11 @@ export class TenderItem extends Entity<string> {
   public markAsWinner(): void {
     this._winner = true;
   }
+
+  public assignProposalValue(value: number): void {
+    if (value < 0) {
+      throw new BusinessRuleException('Proposal value cannot be negative', 'INVALID_PROPOSAL_VALUE');
+    }
+    this._proposalValue = value;
+  }
 }

@@ -1,95 +1,30 @@
-version: "3.9"
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: bidflow-postgres
-    environment:
-      POSTGRES_USER: bidflow
-      POSTGRES_PASSWORD: bidflow_secret
-      POSTGRES_DB: bidflow_db
+  bidflow_db:
+    image: pgvector/pgvector:pg16 # 👈 Alterado para a tag oficial correta (Postgres 16)
+    container_name: bidflow_db_v2
+    restart: always
     ports:
       - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bidflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: bidflow-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  api:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
-    container_name: bidflow-api
     environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://bidflow:bidflow_secret@postgres:5432/bidflow_db
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      PORT: 3001
-    ports:
-      - "3001:3001"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: PASSWORD
+      POSTGRES_DB: bidflow
     volumes:
-      - ./apps/api:/app
-      - /app/node_modules
+      - bidflow_postgres_v2:/var/lib/postgresql/data
 
-  web:
-    build:
-      context: ./apps/web
-      dockerfile: Dockerfile
-    container_name: bidflow-web
-    environment:
-      NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://api:3001
+  bidflow_mq:
+    image: rabbitmq:3-management-alpine
+    container_name: bidflow_rabbitmq_v2
+    restart: always
     ports:
-      - "3000:3000"
-    depends_on:
-      - api
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
-
-  analytics:
-    build:
-      context: ./apps/analytics
-      dockerfile: Dockerfile
-    container_name: bidflow-analytics
-    environment:
-      PYTHON_ENV: development
-      DATABASE_URL: postgresql://bidflow:bidflow_secret@postgres:5432/bidflow_db
-      API_HOST: 0.0.0.0
-      API_PORT: 3002
-    ports:
-      - "3002:3002"
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - bidflow_rabbitmq_data_v2:/var/lib/rabbitmq
 
 volumes:
-  postgres_data:
-  redis_data:
-
-networks:
-  default:
-    name: bidflow-network
+  bidflow_postgres_v2:
+  bidflow_rabbitmq_data_v2:

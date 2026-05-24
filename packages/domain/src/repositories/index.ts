@@ -53,3 +53,4 @@ export interface SoftDeleteRepository<T, TId = string> extends Repository<T, TId
 }
 
 export * from './tender.repository';
+export * from './supplier.repository';

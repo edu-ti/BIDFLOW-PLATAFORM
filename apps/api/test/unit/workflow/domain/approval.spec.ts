@@ -1,13 +1,15 @@
 import { randomUUID } from 'crypto';
 import { ApprovalEntity } from '../../../../src/workflow/domain/approval/approval.entity';
-import { ApprovalEntity } from '../../../../src/workflow/domain/approval/approval.entity';
 import { ApprovalMode, ApprovalStatus } from '../../../../src/workflow/domain/common/enums';
+
 import { ApprovalAlreadyDecidedError, MaxDelegationExceededError, SelfApprovalDeniedError } from '../../../../src/workflow/domain/common/errors';
 import { makeApprovalProps } from '../../../fixtures/workflow.fixtures';
+
 
 describe('ApprovalEntity — Domain', () => {
   const instanceId = randomUUID();
   const stageId = randomUUID();
+  const userId = randomUUID();
 
   describe('create()', () => {
     it('deve criar approval PENDING', () => {
