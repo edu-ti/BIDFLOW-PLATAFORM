@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 
-interface TenantMatchResult {
-  tenant_id: string; // 👈 Agora retorna o ID do Tenant correspondente
-  similarity: number;
+export interface TenantMatchResult {
+  tenantId: string;
+  description: string;
+  distance: number;
+  affinityPercentage: number;
 }
 
 @Injectable()
@@ -13,32 +15,63 @@ export class TenderMatchService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Varre os perfis de interesse de todos os Tenants e descobre
-   * quem tem afinidade semântica com o edital capturado.
+   * Processa o embedding recebido de um edital e busca os tenants com maior afinidade
+   * baseando-se na distância de cosseno.
+   * 
+   * @param payload Payload contendo o array de embeddings gerado pelo modelo
+   * @param tenderId O ID do edital correspondente
    */
-  async findMatchingTenants(
-    tenderEmbedding: number[],
-    threshold = 85, // 85% de similaridade mínima
-    limit = 10
-  ): Promise<TenantMatchResult[]> {
+  async processarNovoEditalEMatch(payload: any, tenderId: string): Promise<TenantMatchResult[]> {
     try {
-      const vectorString = `[${tenderEmbedding.join(',')}]`;
+      if (!payload?.embedding || !Array.isArray(payload.embedding)) {
+        throw new Error('O payload não contém uma propriedade "embedding" válida (array numérico).');
+      }
 
-      // Busca na tabela tenant_preferences usando a distância cosseno corrigida (* 100)
-      const matches = await this.prisma.$queryRaw<TenantMatchResult[]>`
+      // Converte o array de números em uma string de vetor compativel com pgvector
+      const vectorString = `[${payload.embedding.join(',')}]`;
+
+      // 1. Salva ou atualiza o vetor na tabela tender_embeddings
+      await this.prisma.$executeRawUnsafe(`
+        INSERT INTO tender_embeddings (id, tender_id, embedding)
+        VALUES (gen_random_uuid(), $1, $2::vector)
+        ON CONFLICT (tender_id) 
+        DO UPDATE SET embedding = EXCLUDED.embedding;
+      `, tenderId, vectorString);
+
+      this.logger.log(`Embedding salvo/atualizado com sucesso para o edital: ${tenderId}`);
+
+      // 2. Executa a busca de proximidade semântica na tabela tenant_preferences
+      // Utiliza o operador <=> (cosine distance) com limiar (threshold) < 0.35
+      const matches: any[] = await this.prisma.$queryRawUnsafe(`
         SELECT 
-          tenant_id,
-          (1 - (embedding <=> ${vectorString}::vector)) * 100 as similarity
+          tenant_id, 
+          description, 
+          (embedding <=> $1::vector) AS distance
         FROM tenant_preferences
-        WHERE (1 - (embedding <=> ${vectorString}::vector)) * 100 >= ${threshold}
-        ORDER BY embedding <=> ${vectorString}::vector ASC
-        LIMIT ${limit};
-      `;
+        WHERE (embedding <=> $1::vector) < 0.35
+        ORDER BY (embedding <=> $1::vector) ASC;
+      `, vectorString);
 
-      return matches;
+      // 3. Filtra, converte e calcula a afinidade (match) em porcentagem
+      const result: TenantMatchResult[] = matches.map((match) => {
+        const distance = typeof match.distance === 'number' ? match.distance : parseFloat(match.distance);
+        const affinityPercentage = Math.round((1 - distance) * 100);
+
+        return {
+          tenantId: match.tenant_id,
+          description: match.description,
+          distance: distance,
+          affinityPercentage: affinityPercentage,
+        };
+      });
+
+      this.logger.log(`Foram encontrados ${result.length} tenants com match para o edital ${tenderId}`);
+
+      return result;
+
     } catch (error) {
-      this.logger.error(`[AI MATCH ERROR] Falha na busca vetorial por Tenants: ${error.message}`);
-      return [];
+      this.logger.error(`Erro ao processar o matching semântico para o edital ${tenderId}`, error.stack);
+      throw new InternalServerErrorException('Falha no motor de busca semântica para este edital.');
     }
   }
-}
+}

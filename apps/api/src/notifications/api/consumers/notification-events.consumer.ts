@@ -50,35 +50,27 @@ export class NotificationEventsConsumer {
         },
       });
 
-      // 2. Processamento Vetorial com pgvector
+      // 2. Processamento Vetorial e Motor de Match com pgvector
       if (embedding && Array.isArray(embedding)) {
-        await this.prisma.tenderEmbedding.deleteMany({ where: { tenderId: savedTender.id } });
+        // Agora o TenderMatchService lida com o save do vetor e a busca semântica em um único fluxo
+        const matches = await this.matchService.processarNovoEditalEMatch(data, savedTender.id);
 
-        await this.prisma.$executeRawUnsafe(`
-          INSERT INTO tender_embeddings (id, tender_id, embedding, created_at)
-          VALUES (gen_random_uuid(), '${savedTender.id}', '[${embedding.join(',')}]', NOW());
-        `);
-
-        this.logger.log(`[🧠 IA] Embeddings guardados com sucesso para o Edital ID: ${savedTender.id}`);
-
-        // 3. MOTOR DE MATCH (Busca com 85% de similaridade mínima)
-        const tenantMatches = await this.matchService.findMatchingTenants(embedding, 85, 5);
-          // 🔍 LOG TEMPORÁRIO DE DEBUG: Mostra o que o banco calculou
-        this.logger.log(`[📊 DEBUG IA] Encontrados ${tenantMatches.length} possíveis matches para este PDF.`);
-        if (tenantMatches.length > 0) {
-          this.logger.log(`[📊 DEBUG IA] Maior similaridade encontrada para o Tenant: ${tenantMatches[0].similarity.toFixed(2)}%`);
+        this.logger.log(`[📊 DEBUG IA] Encontrados ${matches.length} possíveis matches para este PDF.`);
+        if (matches.length > 0) {
+          this.logger.log(`[📊 DEBUG IA] Maior similaridade encontrada para o Tenant: ${matches[0].affinityPercentage}%`);
         }
-        // 4. DISPARO ÚNICO (Evita duplicações pegando o melhor score)
-        if (tenantMatches.length > 0) {
-          for (const match of tenantMatches) {
+
+        // 3. DISPARO ÚNICO (Evita duplicações pegando o melhor score)
+        if (matches.length > 0) {
+          for (const match of matches) {
             await this.notificationSender.send({
-              tenantId: match.tenant_id,
+              tenantId: match.tenantId,
               level: 'INFO',
-              message: `🎯 MATCH SEMÂNTICO (${match.similarity.toFixed(2)}%)! O ${modality} nº ${data.number} da ${organization} está alinhado ao seu perfil de interesse!`,
-              metadata: { tenderId: savedTender.id, similarity: match.similarity },
+              message: `🎯 MATCH SEMÂNTICO (${match.affinityPercentage}%)! O ${modality} nº ${data.number} da ${organization} está alinhado ao seu perfil de interesse!`,
+              metadata: { tenderId: savedTender.id, similarity: match.affinityPercentage },
             });
             
-            this.logger.log(`[🔔 NOTIFICAÇÃO] Alerta enviado para o Tenant interessado: ${match.tenant_id}`);
+            this.logger.log(`[🔔 NOTIFICAÇÃO] Alerta enviado para o Tenant interessado: ${match.tenantId}`);
           }
         } else {
           this.logger.log(`[🍃 IA] Edital ${data.number} processado, mas nenhum Tenant tem interesse semântico nele. Sem spam!`);

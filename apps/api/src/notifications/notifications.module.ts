@@ -34,6 +34,7 @@ import { PrismaModule } from '../prisma/prisma.module';
   ],
   exports: [
     NOTIFICATION_SENDER,
+    TenderMatchService,
   ],
 })
 export class NotificationsModule {}

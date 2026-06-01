@@ -38,13 +38,55 @@ def gerar_embedding_local(texto: str) -> list:
     """Conecta ao Ollama local e gera o vetor semântico de 768 dimensões."""
     try:
         url = "http://localhost:11434/api/embeddings"
-        payload = {"model": "nomic-embed-text", "prompt": texto}
+        payload = {"model": "nomic-embed-text:latest", "prompt": texto}
 
         response = requests.post(url, json=payload, timeout=15)
+        if response.status_code != 200:
+            print(f"Erro do Ollama: {response.text}")
+            response.raise_for_status()
+
         return response.json()["embedding"]
     except Exception as e:
         print(f" [❌ OLLAMA ERROR] Falha ao gerar embedding: {e}")
         return [0.0] * 768
+
+
+def extrair_metadados_com_llm(texto_edital: str) -> dict:
+    """Extrai metadados estruturados do texto do edital usando LLM local."""
+    try:
+        url = "http://localhost:11434/api/generate"
+        system_prompt = (
+            "Você é um assistente especialista em licitações. "
+            "Extraia do texto a seguir as informações solicitadas e retorne ESTRITAMENTE em formato JSON com as seguintes chaves:\n"
+            "- \"objeto_resumido\": uma string curta descrevendo o que está sendo contratado.\n"
+            "- \"valor_estimado\": o valor em float ou null se não houver.\n"
+            "- \"amparo_legal\": a lei aplicada (ex: Lei 14.133/2021).\n"
+            "- \"criterio_julgamento\": a forma de julgamento (ex: Menor Preço)."
+        )
+        payload = {
+            "model": "gemma:latest",
+            "prompt": f"{system_prompt}\n\nTexto do edital:\n{texto_edital}",
+            "stream": False,
+            "format": "json"
+        }
+
+        response = requests.post(url, json=payload, timeout=180)
+        if response.status_code != 200:
+            print(f"Erro do Ollama: {response.text}")
+            response.raise_for_status()
+
+        response_json = response.json()
+        
+        resultado_str = response_json.get("response", "{}")
+        return json.loads(resultado_str)
+    except Exception as e:
+        print(f" [❌ LLM ERROR] Falha ao extrair metadados com LLM: {e}")
+        return {
+            "objeto_resumido": "Objeto não identificado",
+            "valor_estimado": None,
+            "amparo_legal": "Não identificado",
+            "criterio_julgamento": "Não identificado"
+        }
 
 
 def disparar_esteira_rpa_real(caminho_pdf: str, numero_edital: str, orgao: str):
@@ -54,6 +96,9 @@ def disparar_esteira_rpa_real(caminho_pdf: str, numero_edital: str, orgao: str):
     if not texto_edital:
         print(" [⚠️ AVISO] Processamento cancelado: Texto do edital está vazio.")
         return
+
+    print(" [🤖 IA] Extraindo metadados do edital com Ollama (gemma)...")
+    metadados_llm = extrair_metadados_com_llm(texto_edital)
 
     # 2. Conexão com o RabbitMQ
     credentials = pika.PlainCredentials("guest", "guest")
@@ -68,10 +113,10 @@ def disparar_esteira_rpa_real(caminho_pdf: str, numero_edital: str, orgao: str):
     print(" [🧠 IA] Vetorizando o conteúdo extraído do PDF via Ollama...")
     vetor_real = gerar_embedding_local(texto_edital)
 
-    # Usamos os primeiros 150 caracteres do texto extraído como um título/resumo descritivo
-    resumo_objeto = (
-        texto_edital[:150] + "..." if len(texto_edital) > 150 else texto_edital
-    )
+    # Usa o objeto resumido retornado pela LLM, ou faz fallback se não vier
+    titulo_llm = metadados_llm.get("objeto_resumido")
+    if not titulo_llm or titulo_llm == "Objeto não identificado":
+        titulo_llm = texto_edital[:150] + "..." if len(texto_edital) > 150 else texto_edital
 
     # 4. Payload com dados do documento real
     payload = {
@@ -80,8 +125,9 @@ def disparar_esteira_rpa_real(caminho_pdf: str, numero_edital: str, orgao: str):
         "number": numero_edital,
         "organization": orgao,
         "modality": "PREGAO_ELETRONICO",
-        "title": resumo_objeto,  # Texto extraído do próprio documento
+        "title": titulo_llm,  # Gerado pela LLM
         "embedding": vetor_real,
+        "metadata_llm": metadados_llm,
     }
 
     channel.basic_publish(

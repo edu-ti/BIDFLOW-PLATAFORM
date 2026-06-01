@@ -1079,6 +1079,7 @@ model Tender {
   scoreCriteria      Json?          @map("score_criteria")
   tags               Json?          @default("[]") @map("tags")
   metadata           Json?          @default("{}") @map("metadata")
+  metadataLlm        Json?          @map("metadata_llm")
   customFields       Json?          @default("{}") @map("custom_fields")
   notes              String?        @map("notes") @db.Text
   deletedAt          DateTime?      @map("deleted_at")

@@ -32,6 +32,7 @@ import { JwtAuthGuard } from './common/auth/guards/jwt-auth.guard';
     TendersModule,
     SuppliersModule,
     NotificationsModule,
+    ReportsModule,
   ],
   controllers: [],
   providers: [
