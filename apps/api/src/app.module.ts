@@ -10,6 +10,8 @@ import { TendersModule } from './tenders/tenders.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './common/auth/guards/jwt-auth.guard';
+import { ReportsModule } from './reports/reports.module';
+
 
 @Module({
   imports: [

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+// @ts-ignore
 import FPDF from 'node-fpdf';
 import { PrismaService } from '../prisma/prisma.service';
 
