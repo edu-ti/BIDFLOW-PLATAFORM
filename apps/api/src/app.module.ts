@@ -11,6 +11,8 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './common/auth/guards/jwt-auth.guard';
 import { ReportsModule } from './reports/reports.module';
+import { CrmModule } from './crm/crm.module';
+import { AuthModule } from './auth/auth.module';
 
 
 @Module({
@@ -28,6 +30,7 @@ import { ReportsModule } from './reports/reports.module';
       inject: [ConfigService],
     }),
     PrismaModule,
+    AuthModule,
     UsersModule,
     AuctionsModule,
     BidsModule,
@@ -35,6 +38,7 @@ import { ReportsModule } from './reports/reports.module';
     SuppliersModule,
     NotificationsModule,
     ReportsModule,
+    CrmModule,
   ],
   controllers: [],
   providers: [

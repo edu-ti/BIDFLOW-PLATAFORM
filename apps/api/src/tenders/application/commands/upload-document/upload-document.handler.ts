@@ -1,54 +1,59 @@
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../../../prisma/prisma.service';
 import { UploadTenderDocumentCommand } from './upload-document.command';
-import { TenderRepository } from '../../../../../../../packages/domain/src/repositories/tender.repository';
-import { IEventPublisher } from '../../ports/event-publisher.port';
-import { TenderDocument, DocumentStatus } from '../../../../../../../packages/domain/src/tenders/entities/tender-document.entity';
-import { BusinessRuleException } from '../../../../../../../packages/domain/src/exceptions';
-import { randomUUID } from 'crypto';
 
-export class UploadTenderDocumentHandler {
-  constructor(
-    private readonly tenderRepository: TenderRepository,
-    private readonly eventPublisher: IEventPublisher,
-  ) {}
+@Injectable()
+@CommandHandler(UploadTenderDocumentCommand)
+export class UploadTenderDocumentHandler implements ICommandHandler<UploadTenderDocumentCommand> {
+  constructor(private readonly prisma: PrismaService) {}
 
   async execute(command: UploadTenderDocumentCommand): Promise<string> {
-    const tender = await this.tenderRepository.findById(command.tenderId, command.tenantId);
-    
-    if (!tender) {
-      throw new BusinessRuleException('Tender not found', 'TENDER_NOT_FOUND');
-    }
+    const { tenderId, userId, file, dto } = command;
 
-    const documentId = randomUUID();
+    return this.prisma.$transaction(async (tx) => {
+      // a. Valida se o Tender existe
+      const tender = await tx.tender.findUnique({
+        where: { id: tenderId },
+      });
 
-    const document = new TenderDocument({
-      id: documentId,
-      tenderId: command.tenderId,
-      tenantId: command.tenantId,
-      type: command.type,
-      title: command.title,
-      status: DocumentStatus.PENDING,
-      metadata: { uploadedBy: command.userId },
+      if (!tender) {
+        throw new NotFoundException(`Edital com ID ${tenderId} não encontrado.`);
+      }
+
+      // b. (Simulação de Storage)
+      const fileUrl = `https://storage.fake/${encodeURIComponent(file.originalname)}`;
+      const fileSize = file.size;
+
+      // c. Cria o registo em TenderDocument
+      const document = await tx.tenderDocument.create({
+        data: {
+          tenderId: tenderId,
+          checklistItemId: dto.checklistItemId || null,
+          category: dto.category,
+          title: file.originalname,
+          fileName: file.originalname,
+          fileSize: fileSize,
+          fileType: file.mimetype,
+          fileUrl: fileUrl,
+          uploadedBy: userId,
+          status: 'PENDING',
+        },
+      });
+
+      // d. Se houver um checklistItemId, atualiza o status desse TenderChecklist
+      if (dto.checklistItemId) {
+        await tx.tenderChecklist.update({
+          where: { id: dto.checklistItemId },
+          data: {
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            completedBy: userId,
+          },
+        });
+      }
+
+      return document.id;
     });
-
-    document.uploadFile(command.fileUrl, command.expiresAt || null);
-
-    tender.attachDocument(document);
-
-    await this.tenderRepository.save(tender);
-
-    await this.eventPublisher.publish({
-      eventId: randomUUID(),
-      type: 'bidflow.tender.v1.document_uploaded',
-      tenantId: command.tenantId,
-      occurredAt: new Date().toISOString(),
-      payload: {
-        tenderId: command.tenderId,
-        documentId: document.id,
-        type: command.type,
-        userId: command.userId,
-      },
-    });
-
-    return documentId;
   }
 }

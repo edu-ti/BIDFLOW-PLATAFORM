@@ -20,6 +20,7 @@ import { CreateInstanceHandler, ExecuteTransitionHandler, CancelInstanceHandler,
 import { GetInstanceHandler, ListInstancesHandler, GetInstanceTimelineHandler } from './application/instance/queries/instance-queries.handler';
 import { ApproveHandler, RejectHandler, DelegateApprovalHandler, ListApprovalsHandler } from './application/approval/commands/approval.handlers';
 import { CompleteTaskHandler, ListTasksHandler, ListMyPendingTasksHandler } from './application/task/commands/task.handlers';
+import { TenderAcceptedHandler } from './application/instance/events/tender-accepted.handler';
 import { GetSummaryHandler, GetMyPendingItemsHandler, GetOverdueInstancesHandler } from './application/dashboard/queries/dashboard-queries.handler';
 import { DefinitionPublishingService, DefinitionStageService, DefinitionTransitionService } from './application/common/services/definition-orchestration.service';
 import { InstanceOrchestrationService } from './application/common/services/instance-orchestration.service';
@@ -87,6 +88,10 @@ const queryHandlers = [
   GetSummaryHandler, GetMyPendingItemsHandler, GetOverdueInstancesHandler,
 ];
 
+const eventHandlers = [
+  TenderAcceptedHandler,
+];
+
 const infrastructure = [
   WorkflowEventPublisher, RabbitMqEventPublisher, WorkflowObservabilityService,
   WorkflowPermissionGuard,
@@ -101,6 +106,7 @@ const infrastructure = [
     ...orchestrators,
     ...commandHandlers,
     ...queryHandlers,
+    ...eventHandlers,
     ...infrastructure,
   ],
   exports: [],

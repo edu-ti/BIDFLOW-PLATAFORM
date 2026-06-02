@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CqrsModule } from '@nestjs/cqrs';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenderController } from './api/controllers/tender.controller';
 import { PrismaTenderRepository } from './infrastructure/persistence/prisma/prisma-tender.repository';
@@ -9,10 +10,15 @@ import { PlaceDisputeBidHandler } from './application/commands/place-dispute-bid
 import { ProcessTenderResultHandler } from './application/commands/process-tender-result/process-tender-result.handler';
 import { UploadTenderDocumentHandler } from './application/commands/upload-document/upload-document.handler';
 import { ValidateTenderDocumentHandler } from './application/commands/validate-document/validate-document.handler';
+import { AcceptTenderHandler } from './application/commands/accept-tender/accept-tender.handler';
+import { GetTenderChecklistsHandler } from './application/queries/get-tender-checklists/get-tender-checklists.handler';
+import { SubmitTenderAnalysisHandler } from './application/commands/submit-analysis/submit-analysis.handler';
+import { CreateTenderProposalHandler } from './application/commands/create-proposal/create-proposal.handler';
+import { TenderProposalPdfService } from './application/services/tender-proposal-pdf.service';
 import { IEventPublisher } from './application/ports/event-publisher.port';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, CqrsModule],
   controllers: [TenderController],
   providers: [
     {
@@ -65,6 +71,11 @@ import { IEventPublisher } from './application/ports/event-publisher.port';
       },
       inject: ['TenderRepository', 'TenderEventPublisher'],
     },
+    AcceptTenderHandler,
+    GetTenderChecklistsHandler,
+    SubmitTenderAnalysisHandler,
+    CreateTenderProposalHandler,
+    TenderProposalPdfService,
   ],
   exports: [
     'TenderRepository', 
@@ -73,7 +84,8 @@ import { IEventPublisher } from './application/ports/event-publisher.port';
     PlaceDisputeBidHandler, 
     ProcessTenderResultHandler,
     UploadTenderDocumentHandler,
-    ValidateTenderDocumentHandler
+    ValidateTenderDocumentHandler,
+    AcceptTenderHandler
   ],
 })
 export class TendersModule {}

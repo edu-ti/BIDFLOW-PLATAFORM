@@ -1,4 +1,6 @@
-import { Controller, Post, Patch, Body, Param } from '@nestjs/common';
+import { Controller, Post, Patch, Get, Body, Param, UseInterceptors, UploadedFile, BadRequestException, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CurrentTenant } from '../../../workflow/api/guards/current-tenant.decorator';
 import { CaptureTenderDto } from '../../application/commands/capture-tender/capture-tender.dto';
@@ -20,10 +22,19 @@ import { ProcessTenderResultHandler } from '../../application/commands/process-t
 import { UploadTenderDocumentDto } from '../../application/commands/upload-document/upload-document.dto';
 import { UploadTenderDocumentCommand } from '../../application/commands/upload-document/upload-document.command';
 import { UploadTenderDocumentHandler } from '../../application/commands/upload-document/upload-document.handler';
-
 import { ValidateTenderDocumentDto } from '../../application/commands/validate-document/validate-document.dto';
 import { ValidateTenderDocumentCommand } from '../../application/commands/validate-document/validate-document.command';
 import { ValidateTenderDocumentHandler } from '../../application/commands/validate-document/validate-document.handler';
+
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { AcceptTenderDto } from '../../application/commands/accept-tender/accept-tender.dto';
+import { AcceptTenderCommand } from '../../application/commands/accept-tender/accept-tender.command';
+import { GetTenderChecklistsQuery } from '../../application/queries/get-tender-checklists/get-tender-checklists.query';
+import { SubmitTenderAnalysisDto } from '../../application/commands/submit-analysis/submit-analysis.dto';
+import { SubmitTenderAnalysisCommand } from '../../application/commands/submit-analysis/submit-analysis.command';
+import { CreateTenderProposalDto } from '../../application/commands/create-proposal/create-proposal.dto';
+import { CreateTenderProposalCommand } from '../../application/commands/create-proposal/create-proposal.command';
+import { TenderProposalPdfService } from '../../application/services/tender-proposal-pdf.service';
 
 @ApiTags('Tenders')
 @ApiBearerAuth()
@@ -36,6 +47,9 @@ export class TenderController {
     private readonly processTenderResultHandler: ProcessTenderResultHandler,
     private readonly uploadTenderDocumentHandler: UploadTenderDocumentHandler,
     private readonly validateTenderDocumentHandler: ValidateTenderDocumentHandler,
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
+    private readonly tenderProposalPdfService: TenderProposalPdfService,
   ) {}
 
   @Post('capture')
@@ -129,23 +143,27 @@ export class TenderController {
   @Post(':id/documents')
   @ApiOperation({ summary: 'Upload a compliance document for a tender' })
   @ApiResponse({ status: 201, description: 'Document uploaded successfully' })
-  @ApiResponse({ status: 400, description: 'Tender not found or document already validated' })
+  @ApiResponse({ status: 400, description: 'Tender not found or file missing' })
+  @UseInterceptors(FileInterceptor('file'))
   async uploadDocument(
     @Param('id') tenderId: string,
+    @UploadedFile() file: Express.Multer.File,
     @Body() dto: UploadTenderDocumentDto,
     @CurrentTenant() tenant: any,
   ) {
+    if (!file) {
+      throw new BadRequestException('Ficheiro não fornecido.');
+    }
+
     const command = new UploadTenderDocumentCommand(
       tenderId,
       tenant.tenantId,
       tenant.userId || 'system',
-      dto.type,
-      dto.title,
-      dto.fileUrl,
-      dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+      file,
+      dto,
     );
 
-    const documentId = await this.uploadTenderDocumentHandler.execute(command);
+    const documentId = await this.commandBus.execute(command);
     return { success: true, message: 'Document uploaded successfully', documentId };
   }
 
@@ -169,5 +187,94 @@ export class TenderController {
 
     await this.validateTenderDocumentHandler.execute(command);
     return { success: true, message: 'Document validated successfully' };
+  }
+
+  @Post(':id/accept')
+  @ApiOperation({ summary: 'Accept a tender and convert it into a CRM Opportunity' })
+  @ApiResponse({ status: 201, description: 'Tender accepted and Opportunity created' })
+  @ApiResponse({ status: 404, description: 'Tender not found' })
+  async acceptTender(
+    @Param('id') tenderId: string,
+    @Body() dto: AcceptTenderDto,
+    @CurrentTenant() tenant: any,
+  ) {
+    const command = new AcceptTenderCommand(
+      tenderId,
+      tenant.tenantId,
+    );
+
+    // Despacha o comando através do CommandBus
+    return this.commandBus.execute(command);
+  }
+
+  @Get(':id/checklists')
+  @ApiOperation({ summary: 'Obtém a checklist de documentos e tarefas de um edital' })
+  @ApiResponse({ status: 200, description: 'Checklist obtida com sucesso' })
+  async getChecklists(
+    @Param('id') tenderId: string,
+    @CurrentTenant() tenant: any,
+  ) {
+    const query = new GetTenderChecklistsQuery(
+      tenderId,
+      tenant.tenantId,
+    );
+
+    return this.queryBus.execute(query);
+  }
+
+  @Post(':id/analyses/viability')
+  @ApiOperation({ summary: 'Submete a análise de viabilidade para um edital' })
+  @ApiResponse({ status: 201, description: 'Análise de viabilidade submetida com sucesso' })
+  async submitViabilityAnalysis(
+    @Param('id') tenderId: string,
+    @Body() dto: SubmitTenderAnalysisDto,
+    @CurrentTenant() tenant: any,
+  ) {
+    const command = new SubmitTenderAnalysisCommand(
+      tenderId,
+      tenant.tenantId,
+      tenant.userId || 'system',
+      dto,
+    );
+
+    const analysisId = await this.commandBus.execute(command);
+    return { success: true, message: 'Análise de viabilidade submetida com sucesso.', analysisId };
+  }
+
+  @Post(':id/proposals')
+  @ApiOperation({ summary: 'Submete a proposta comercial para um edital' })
+  @ApiResponse({ status: 201, description: 'Proposta comercial submetida com sucesso' })
+  async submitProposal(
+    @Param('id') tenderId: string,
+    @Body() dto: CreateTenderProposalDto,
+    @CurrentTenant() tenant: any,
+  ) {
+    const command = new CreateTenderProposalCommand(
+      tenderId,
+      tenant.tenantId,
+      tenant.userId || 'system',
+      dto,
+    );
+
+    const proposalId = await this.commandBus.execute(command);
+    return { success: true, message: 'Proposta comercial submetida com sucesso.', proposalId };
+  }
+
+  @Get(':id/proposals/pdf')
+  @ApiOperation({ summary: 'Exporta a proposta comercial oficial em PDF' })
+  @ApiResponse({ status: 200, description: 'Download do PDF da proposta' })
+  async exportProposalPdf(
+    @Param('id') tenderId: string,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.tenderProposalPdfService.gerarPdfProposta(tenderId);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="Proposta_Comercial.pdf"',
+      'Content-Length': pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
   }
 }
