@@ -248,7 +248,7 @@ export class TenderController {
   @Post(':id/proposals')
   @ApiOperation({ summary: 'Submete a proposta comercial para um edital' })
   @ApiResponse({ status: 201, description: 'Proposta comercial submetida com sucesso' })
-  async submitProposal(
+  async submitCommercialProposal(
     @Param('id') tenderId: string,
     @Body() dto: CreateTenderProposalDto,
     @CurrentTenant() tenant: any,

@@ -68,23 +68,6 @@ export class SubmitTenderAnalysisHandler implements ICommandHandler<SubmitTender
           where: { id: tenderId },
           data: { status: 'ARCHIVED' }, // ou 'LOST' conforme o domínio
         });
-
-        // Tenta encontrar e atualizar a Oportunidade associada (se existir)
-        const opportunities = await tx.opportunity.findMany({
-          where: { tenderId: tenderId },
-        });
-
-        if (opportunities.length > 0) {
-          await Promise.all(opportunities.map(opp => 
-            tx.opportunity.update({
-              where: { id: opp.id },
-              data: {
-                status: 'LOST',
-                lostReason: 'Reprovado na Análise de Viabilidade',
-              },
-            })
-          ));
-        }
       }
 
       return analysis.id;

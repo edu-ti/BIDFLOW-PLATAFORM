@@ -50,6 +50,10 @@ export class AcceptTenderHandler implements ICommandHandler<AcceptTenderCommand>
             name: 'Funil de Licitações',
             slug: 'licitacoes-default',
             isDefault: true,
+            stages: [
+              { id: 'QUALIFICACAO', name: 'Qualificação', order: 1 },
+              { id: 'NEGOCIACAO', name: 'Negociação', order: 2 }
+            ],
           },
         });
       }

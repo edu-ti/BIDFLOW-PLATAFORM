@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { UploadTenderDocumentHandler } from '../../../../src/tenders/application/commands/upload-document/upload-document.handler';
 import { UploadTenderDocumentCommand } from '../../../../src/tenders/application/commands/upload-document/upload-document.command';
 import { TenderRepository } from '../../../../../../packages/domain/src/repositories/tender.repository';

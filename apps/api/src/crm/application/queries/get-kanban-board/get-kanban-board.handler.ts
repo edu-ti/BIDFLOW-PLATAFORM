@@ -77,7 +77,6 @@ export class GetKanbanBoardHandler implements IQueryHandler<GetKanbanBoardQuery>
           currency: opp.currency,
           status: opp.status,
           probability: opp.probability,
-          tenderId: opp.tenderId,
           createdAt: opp.createdAt,
         })),
         totalValue: oppsInStage.reduce((acc, curr) => acc + Number(curr.estimatedValue || 0), 0),

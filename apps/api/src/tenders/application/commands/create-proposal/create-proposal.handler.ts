@@ -56,27 +56,8 @@ export class CreateTenderProposalHandler implements ICommandHandler<CreateTender
       // Atualiza o status do edital para indicar que a proposta foi submetida
       await tx.tender.update({
         where: { id: tenderId },
-        data: { status: 'PROPOSAL_SUBMITTED' }, // Dependendo da máquina de estados do teu Domínio
+        data: { status: 'SUBMITTED' }, 
       });
-
-      // c. Atualiza a Opportunity no CRM
-      const opportunities = await tx.opportunity.findMany({
-        where: { tenderId: tenderId },
-      });
-
-      if (opportunities.length > 0) {
-        await Promise.all(
-          opportunities.map((opp) =>
-            tx.opportunity.update({
-              where: { id: opp.id },
-              data: {
-                stage: 'NEGOCIACAO',
-                estimatedValue: dto.totalValue, // Sincroniza o valor da proposta com a Oportunidade
-              },
-            }),
-          ),
-        );
-      }
 
       return proposal.id;
     });

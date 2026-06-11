@@ -47,7 +47,6 @@ export class TenderAcceptedHandler implements IEventHandler<TenderAcceptedEvent>
           // Cria a Stage inicial associada à definição
           const stage = await tx.workflowStage.create({
             data: {
-              tenantId: event.tenantId,
               workflowDefinitionId: definition.id,
               name: 'Preparação de Documentação',
               slug: 'preparacao-documentacao',
