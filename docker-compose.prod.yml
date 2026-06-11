@@ -1,0 +1,154 @@
+version: '3.8'
+
+networks:
+  bidflow_network:
+    name: bidflow_network
+    driver: bridge
+
+volumes:
+  bidflow_pgdata:
+    name: bidflow_pgdata
+  bidflow_mqdata:
+    name: bidflow_mqdata
+
+services:
+  # -----------------------------------------------------
+  # REVERSE PROXY (TRAEFIK)
+  # -----------------------------------------------------
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik_proxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - bidflow_network
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # ATENÇÃO: O ficheiro ./acme.json precisa ser criado no servidor anfitrião 
+      # com permissões 'chmod 600 acme.json' antes de rodar o compose.
+      - ./acme.json:/acme.json
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=bidflow_network"
+      # Configuração dos entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      # Let's Encrypt / Certificados
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@bidflow.app}" # Placeholder de e-mail
+      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
+
+  # -----------------------------------------------------
+  # BASES DE DADOS E MESSAGE BROKERS
+  # -----------------------------------------------------
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: bidflow_postgres
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SUA_SENHA_FORTE_AQUI}
+      POSTGRES_DB: ${POSTGRES_DB:-bidflow}
+    volumes:
+      - bidflow_pgdata:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: bidflow_rabbitmq
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}
+    volumes:
+      - bidflow_mqdata:/var/lib/rabbitmq
+    # Opcionalmente podes expor a porta de management internamente (15672) ou pelo traefik
+
+  # -----------------------------------------------------
+  # SERVIÇOS DA APLICAÇÃO (MONOREPO)
+  # -----------------------------------------------------
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.prod
+    container_name: bidflow_api
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-SUA_SENHA_FORTE_AQUI}@postgres:5432/${POSTGRES_DB:-bidflow}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET:-SUA_CHAVE_SECRETA_JWT_AQUI}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.bidflow.app`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      - "traefik.http.services.api.loadbalancer.server.port=3000"
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.prod
+    container_name: bidflow_web
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://api.bidflow.app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`app.bidflow.app`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=myresolver"
+      - "traefik.http.services.web.loadbalancer.server.port=3000"
+
+  analytics:
+    build:
+      context: ./apps/analytics
+      dockerfile: Dockerfile.prod
+    container_name: bidflow_analytics
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    environment:
+      ENVIRONMENT: production
+      API_KEY: ${ANALYTICS_API_KEY:-CHAVE_API_ANALYTICS}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.analytics.rule=Host(`analytics.bidflow.app`)"
+      - "traefik.http.routers.analytics.entrypoints=websecure"
+      - "traefik.http.routers.analytics.tls.certresolver=myresolver"
+      - "traefik.http.services.analytics.loadbalancer.server.port=8000"
+
+  rpa_worker:
+    build:
+      # Assume-se que a estrutura da pasta é esta e o Dockerfile correspondente exista
+      context: ./apps/rpa_worker
+      dockerfile: Dockerfile.prod
+    container_name: bidflow_rpa_worker
+    restart: unless-stopped
+    networks:
+      - bidflow_network
+    depends_on:
+      - rabbitmq
+    environment:
+      NODE_ENV: production
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+    # Trabalhadores em background normalmente não precisam de ser expostos via Traefik 
+    # pois não recebem pedidos HTTP diretos da web. Consomem apenas a fila (RabbitMQ).

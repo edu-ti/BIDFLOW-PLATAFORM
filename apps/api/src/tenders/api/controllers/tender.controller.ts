@@ -34,7 +34,11 @@ import { SubmitTenderAnalysisDto } from '../../application/commands/submit-analy
 import { SubmitTenderAnalysisCommand } from '../../application/commands/submit-analysis/submit-analysis.command';
 import { CreateTenderProposalDto } from '../../application/commands/create-proposal/create-proposal.dto';
 import { CreateTenderProposalCommand } from '../../application/commands/create-proposal/create-proposal.command';
+import { AskTenderAiDto } from '../../application/queries/ask-tender-ai/ask-tender-ai.dto';
+import { AskTenderAiQuery } from '../../application/queries/ask-tender-ai/ask-tender-ai.query';
+import { SubmitBidToPortalCommand } from '../../application/commands/submit-bid-to-portal/submit-bid-to-portal.command';
 import { TenderProposalPdfService } from '../../application/services/tender-proposal-pdf.service';
+import { HttpStatus, HttpCode } from '@nestjs/common';
 
 @ApiTags('Tenders')
 @ApiBearerAuth()
@@ -276,5 +280,34 @@ export class TenderController {
     });
 
     res.end(pdfBuffer);
+  }
+
+  @Post(':id/proposals/submit-to-portal')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Envia automaticamente a proposta ao portal de compras' })
+  @ApiResponse({ status: 202, description: 'Envio da proposta iniciado com sucesso' })
+  async submitBidToPortal(
+    @Param('id') tenderId: string,
+    @CurrentTenant() tenant: any,
+  ) {
+    const command = new SubmitBidToPortalCommand(tenderId, tenant.tenantId);
+    await this.commandBus.execute(command);
+    
+    return { success: true, message: 'Envio da proposta iniciado' };
+  }
+
+  @Post(':id/ai/ask')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Faz uma pergunta ao chatbot especialista RAG sobre este edital' })
+  @ApiResponse({ status: 200, description: 'Resposta da IA gerada com sucesso' })
+  async askTenderAi(
+    @Param('id') tenderId: string,
+    @Body() dto: AskTenderAiDto,
+    @CurrentTenant() tenant: any,
+  ) {
+    const query = new AskTenderAiQuery(tenderId, tenant.tenantId, dto.question);
+    const result = await this.queryBus.execute(query);
+    
+    return result;
   }
 }

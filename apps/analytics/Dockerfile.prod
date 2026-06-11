@@ -1,0 +1,43 @@
+# Multi-stage build para Python/FastAPI Analytics
+
+# Fase de Builder
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Instala dependências de build (ex: compiladores para certas libs C)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia dependências e instala no utilizador local (/root/.local)
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Fase de Produção
+FROM python:3.11-slim AS production
+
+WORKDIR /app
+
+# Evita que o Python crie ficheiros .pyc e faz o output diretamente no terminal
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Cria utilizador não-root
+RUN addgroup --gid 1001 pythonapp && \
+    adduser --uid 1001 --gid 1001 --disabled-password --gecos "" pythonapp
+
+# Copia as dependências instaladas na fase de builder
+COPY --from=builder --chown=pythonapp:pythonapp /root/.local /home/pythonapp/.local
+# Adiciona o diretório de binários locais ao PATH
+ENV PATH=/home/pythonapp/.local/bin:$PATH
+
+# Copia o código da aplicação
+COPY --chown=pythonapp:pythonapp . .
+
+USER pythonapp
+
+EXPOSE 8000
+
+# Comando de arranque com Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

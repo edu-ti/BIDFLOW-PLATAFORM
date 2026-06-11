@@ -1,0 +1,51 @@
+# Multi-stage build para Next.js Web App
+
+# Fase de Builder
+FROM node:20-alpine AS builder
+
+# libc6-compat é frequentemente necessário para o Next.js no Alpine
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Instala dependências
+COPY package*.json ./
+RUN npm install
+
+# Copia o código fonte
+COPY . .
+
+# Desativa a telemetria do Next.js
+ENV NEXT_TELEMETRY_DISABLED 1
+
+# Faz o build estático/standalone
+# Nota: Garante que 'output: "standalone"' está configurado no next.config.js
+RUN npm run build
+
+# Fase de Produção
+FROM node:20-alpine AS production
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED 1
+
+# Cria utilizador não-root
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001 -G nodejs
+
+# Copia os ficheiros gerados pelo standalone build
+# A pasta standalone tem o seu próprio node_modules minimo e server.js
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+# Copia as pastas estáticas necessárias
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+USER nextjs
+
+# Expõe a porta
+EXPOSE 3000
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+
+# Executa o server gerado pelo standalone
+CMD ["node", "server.js"]

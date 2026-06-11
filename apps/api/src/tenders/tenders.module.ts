@@ -14,6 +14,8 @@ import { AcceptTenderHandler } from './application/commands/accept-tender/accept
 import { GetTenderChecklistsHandler } from './application/queries/get-tender-checklists/get-tender-checklists.handler';
 import { SubmitTenderAnalysisHandler } from './application/commands/submit-analysis/submit-analysis.handler';
 import { CreateTenderProposalHandler } from './application/commands/create-proposal/create-proposal.handler';
+import { AskTenderAiHandler } from './application/queries/ask-tender-ai/ask-tender-ai.handler';
+import { SubmitBidToPortalHandler } from './application/commands/submit-bid-to-portal/submit-bid-to-portal.handler';
 import { TenderProposalPdfService } from './application/services/tender-proposal-pdf.service';
 import { IEventPublisher } from './application/ports/event-publisher.port';
 
@@ -73,8 +75,10 @@ import { IEventPublisher } from './application/ports/event-publisher.port';
     },
     AcceptTenderHandler,
     GetTenderChecklistsHandler,
+    AskTenderAiHandler,
     SubmitTenderAnalysisHandler,
     CreateTenderProposalHandler,
+    SubmitBidToPortalHandler,
     TenderProposalPdfService,
   ],
   exports: [
