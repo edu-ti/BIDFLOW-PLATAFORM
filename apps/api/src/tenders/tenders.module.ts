@@ -59,13 +59,7 @@ import { IEventPublisher } from './application/ports/event-publisher.port';
       },
       inject: ['TenderRepository', 'TenderEventPublisher'],
     },
-    {
-      provide: UploadTenderDocumentHandler,
-      useFactory: (tenderRepo: PrismaTenderRepository, eventPublisher: IEventPublisher) => {
-        return new UploadTenderDocumentHandler(tenderRepo, eventPublisher);
-      },
-      inject: ['TenderRepository', 'TenderEventPublisher'],
-    },
+    UploadTenderDocumentHandler,
     {
       provide: ValidateTenderDocumentHandler,
       useFactory: (tenderRepo: PrismaTenderRepository, eventPublisher: IEventPublisher) => {

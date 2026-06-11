@@ -17,7 +17,7 @@ export class LoginHandler implements ICommandHandler<LoginCommand> {
     const { email, password } = command.dto;
 
     // a. Procura o utilizador no Prisma através do email
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { email },
     });
 
@@ -26,7 +26,7 @@ export class LoginHandler implements ICommandHandler<LoginCommand> {
     }
 
     // b. Compara a password fornecida com a hash guardada no banco
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash || '');
+    const isPasswordValid = await bcrypt.compare(password, user.password || '');
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Credenciais inválidas');
