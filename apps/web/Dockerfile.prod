@@ -13,7 +13,7 @@ RUN npm install --no-package-lock --legacy-peer-deps
 
 # --- A CORREÇÃO MÁGICA PARA O CSS ---
 # Garante que o Tailwind e os seus motores estão presentes à força
-RUN npm install tailwindcss postcss autoprefixer
+# RUN npm install tailwindcss postcss autoprefixer
 # ------------------------------------
 
 # 4. Gera o Prisma para o Next.js
