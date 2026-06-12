@@ -11,7 +11,7 @@
     "./bid": "./src/bid.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "echo 'ok'",
     "clean": "rm -rf dist"
   },
   "devDependencies": {

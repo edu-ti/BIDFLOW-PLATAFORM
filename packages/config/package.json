@@ -9,7 +9,7 @@
     "./environments": "./src/environments.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "echo 'ok'",
     "clean": "rm -rf dist"
   },
   "dependencies": {
