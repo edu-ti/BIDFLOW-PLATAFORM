@@ -79,8 +79,8 @@ services:
   # -----------------------------------------------------
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: ./apps/api/Dockerfile.prod
     container_name: bidflow_api
     restart: unless-stopped
     networks:
@@ -102,8 +102,8 @@ services:
 
   web:
     build:
-      context: ./apps/web
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: ./apps/web/Dockerfile.prod
     container_name: bidflow_web
     restart: unless-stopped
     networks:

@@ -1,0 +1,13 @@
+# Imagem oficial da Microsoft com o Chromium e dependências instaladas
+FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+
+WORKDIR /app
+
+# Instala a biblioteca do RabbitMQ e Playwright
+RUN pip install pika playwright
+
+# Copia o código do robô para dentro do contentor
+COPY . .
+
+# Comando de arranque para ficar a ouvir a fila de submissões
+CMD ["python", "rpa_bid_submitter.py"]

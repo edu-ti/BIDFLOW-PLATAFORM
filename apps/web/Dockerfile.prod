@@ -1,51 +1,32 @@
-# Multi-stage build para Next.js Web App
+FROM node:20-alpine
 
-# Fase de Builder
-FROM node:20-alpine AS builder
+# 1. Instala dependências do sistema e OpenSSL
+RUN apk add --no-cache libc6-compat openssl python3 make g++
 
-# libc6-compat é frequentemente necessário para o Next.js no Alpine
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Instala dependências
-COPY package*.json ./
-RUN npm install
-
-# Copia o código fonte
+# 2. Copia todo o Monorepo para dentro do contentor
 COPY . .
 
-# Desativa a telemetria do Next.js
-ENV NEXT_TELEMETRY_DISABLED 1
+# 3. Instala as dependências a partir da raiz
+RUN npm install --no-package-lock --legacy-peer-deps
 
-# Faz o build estático/standalone
-# Nota: Garante que 'output: "standalone"' está configurado no next.config.js
-RUN npm run build
+# --- A CORREÇÃO MÁGICA PARA O CSS ---
+# Garante que o Tailwind e os seus motores estão presentes à força
+RUN npm install tailwindcss postcss autoprefixer
+# ------------------------------------
 
-# Fase de Produção
-FROM node:20-alpine AS production
+# 4. Gera o Prisma para o Next.js
+ENV DATABASE_URL="postgresql://fake:fake@localhost:5432/fake"
+RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 
-WORKDIR /app
+# 5. Desativa a telemetria do Next.js
+ENV NEXT_TELEMETRY_DISABLED=1
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED 1
+# 6. Constrói o Front-end (Restaurámos o comando do Turborepo!)
+RUN npx turbo run build --filter=@bidflow/web
 
-# Cria utilizador não-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 -G nodejs
-
-# Copia os ficheiros gerados pelo standalone build
-# A pasta standalone tem o seu próprio node_modules minimo e server.js
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-# Copia as pastas estáticas necessárias
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-
-USER nextjs
-
-# Expõe a porta
 EXPOSE 3000
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
 
-# Executa o server gerado pelo standalone
-CMD ["node", "server.js"]
+# 7. Arranca a Aplicação Web
+CMD ["npm", "run", "start", "-w", "apps/web"]

@@ -1,51 +1,24 @@
-# Multi-stage build para NestJS API
+FROM node:20-alpine
 
-# Fase de Builder
-FROM node:20-alpine AS builder
+# 1. Instala o OpenSSL (Vital para o Prisma!) e dependências do sistema
+RUN apk add --no-cache libc6-compat openssl python3 make g++
 
 WORKDIR /app
 
-# Instala dependências globais se necessário (ex: npm mais recente)
-# RUN npm install -g npm@latest
-
-# Copia os ficheiros de dependência
-# Nota: Num monorepo Turborepo, dependendo da configuração, podes precisar de copiar do root.
-# Assumindo uma abordagem focada na app para manter a simplicidade solicitada:
-COPY package*.json ./
-RUN npm install
-
-# Copia o código fonte
+# 2. Copia todo o Monorepo para dentro do contentor
 COPY . .
 
-# Gera o Prisma Client e faz o build
-# Assumindo que a pasta prisma está na raiz deste contexto (apps/api)
-RUN npx prisma generate
-RUN npm run build
+# 3. Instala as dependências a partir da raiz (ignorando conflitos)
+RUN npm install --no-package-lock --legacy-peer-deps
 
-# Fase de Produção
-FROM node:20-alpine AS production
+# 4. Variável temporária e geração do Prisma
+ENV DATABASE_URL="postgresql://fake:fake@localhost:5432/fake"
+RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 
-WORKDIR /app
+# 5. Constrói apenas a API usando o Turborepo
+RUN cd apps/api && npm run build
 
-# Define ambiente de produção
-ENV NODE_ENV=production
-
-# Cria um utilizador não-root para maior segurança
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nestjs -u 1001 -G nodejs
-
-# Copia apenas os artefatos necessários da fase de builder
-COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
-# Também podes querer copiar o package.json se precisares de rodar scripts em prod
-COPY --from=builder --chown=nestjs:nodejs /app/package*.json ./
-
-# Muda para o utilizador não-root
-USER nestjs
-
-# Expõe a porta (ajustar se a API usar outra)
 EXPOSE 3000
 
-# Comando de arranque
-CMD ["node", "dist/main.js"]
+# 6. Arranca a API no ambiente de produção
+CMD ["npm", "run", "start:prod", "-w", "apps/api"]
