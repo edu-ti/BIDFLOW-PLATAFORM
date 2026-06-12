@@ -14,6 +14,7 @@
     "@bidflow/config": "*",
     "@bidflow/types": "*",
     "@bidflow/ui": "*",
+    "@tailwindcss/postcss": "^4.3.1",
     "autoprefixer": "^10.5.0",
     "axios": "^1.6.2",
     "next": "14.0.4",
