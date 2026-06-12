@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { InputHTMLAttributes } from 'react';
 
 export type InputSize = 'sm' | 'md' | 'lg';
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
+  // As tuas props personalizadas
   label?: string;
   error?: string;
   helperText?: string;
