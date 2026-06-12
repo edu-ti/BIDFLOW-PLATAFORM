@@ -139,7 +139,7 @@ services:
   rpa_worker:
     build:
       # Assume-se que a estrutura da pasta é esta e o Dockerfile correspondente exista
-      context: ./apps/rpa_worker
+      context: ./apps/rpa
       dockerfile: Dockerfile.prod
     container_name: bidflow_rpa_worker
     restart: unless-stopped
