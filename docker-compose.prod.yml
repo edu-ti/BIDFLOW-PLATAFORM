@@ -42,7 +42,7 @@ services:
       - "--entrypoints.websecure.address=:443"
       # Let's Encrypt / Certificados
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@bidflow.app}" # Placeholder de e-mail
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:-admin@bidflow.com.br}"
       - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
 
   # -----------------------------------------------------
@@ -68,11 +68,10 @@ services:
     networks:
       - bidflow_network
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:guest}
     volumes:
       - bidflow_mqdata:/var/lib/rabbitmq
-    # Opcionalmente podes expor a porta de management internamente (15672) ou pelo traefik
 
   # -----------------------------------------------------
   # SERVIÇOS DA APLICAÇÃO (MONOREPO)
@@ -91,11 +90,11 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-SUA_SENHA_FORTE_AQUI}@postgres:5432/${POSTGRES_DB:-bidflow}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:guest}@rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:-SUA_CHAVE_SECRETA_JWT_AQUI}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.bidflow.app`)"
+      - "traefik.http.routers.api.rule=Host(`api.bidflow.com.br`)"
       - "traefik.http.routers.api.entrypoints=websecure"
       - "traefik.http.routers.api.tls.certresolver=myresolver"
       - "traefik.http.services.api.loadbalancer.server.port=3000"
@@ -110,10 +109,10 @@ services:
       - bidflow_network
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: https://api.bidflow.app
+      NEXT_PUBLIC_API_URL: https://api.bidflow.com.br
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web.rule=Host(`app.bidflow.app`)"
+      - "traefik.http.routers.web.rule=Host(`app.bidflow.com.br`)"
       - "traefik.http.routers.web.entrypoints=websecure"
       - "traefik.http.routers.web.tls.certresolver=myresolver"
       - "traefik.http.services.web.loadbalancer.server.port=3000"
@@ -131,14 +130,13 @@ services:
       API_KEY: ${ANALYTICS_API_KEY:-CHAVE_API_ANALYTICS}
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.analytics.rule=Host(`analytics.bidflow.app`)"
+      - "traefik.http.routers.analytics.rule=Host(`analytics.bidflow.com.br`)"
       - "traefik.http.routers.analytics.entrypoints=websecure"
       - "traefik.http.routers.analytics.tls.certresolver=myresolver"
       - "traefik.http.services.analytics.loadbalancer.server.port=8000"
 
   rpa_worker:
     build:
-      # Assume-se que a estrutura da pasta é esta e o Dockerfile correspondente exista
       context: ./apps/rpa
       dockerfile: Dockerfile.prod
     container_name: bidflow_rpa_worker
@@ -149,6 +147,4 @@ services:
       - rabbitmq
     environment:
       NODE_ENV: production
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
-    # Trabalhadores em background normalmente não precisam de ser expostos via Traefik 
-    # pois não recebem pedidos HTTP diretos da web. Consomem apenas a fila (RabbitMQ).
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:guest}@rabbitmq:5672
