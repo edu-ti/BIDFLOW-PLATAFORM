@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 
+
 interface TenderAnalysisPanelProps {
   tenderId: string;
 }

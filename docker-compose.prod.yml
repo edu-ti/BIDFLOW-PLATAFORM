@@ -16,9 +16,11 @@ services:
   # REVERSE PROXY (TRAEFIK)
   # -----------------------------------------------------
   traefik:
-    image: traefik:v2.10
+    image: traefik:v2.11
     container_name: traefik_proxy
     restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.41
     security_opt:
       - no-new-privileges:true
     networks:
@@ -68,8 +70,8 @@ services:
     networks:
       - bidflow_network
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}
     volumes:
       - bidflow_mqdata:/var/lib/rabbitmq
 
@@ -90,7 +92,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-SUA_SENHA_FORTE_AQUI}@postgres:5432/${POSTGRES_DB:-bidflow}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:guest}@rabbitmq:5672
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:-SUA_CHAVE_SECRETA_JWT_AQUI}
     labels:
       - "traefik.enable=true"
@@ -147,4 +149,4 @@ services:
       - rabbitmq
     environment:
       NODE_ENV: production
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:guest}@rabbitmq:5672
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
