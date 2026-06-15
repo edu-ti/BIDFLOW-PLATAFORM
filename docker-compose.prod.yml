@@ -92,7 +92,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-SUA_SENHA_FORTE_AQUI}@postgres:5432/${POSTGRES_DB:-bidflow}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+      RABBITMQ_URL=amqp: //admin:admin@bidflow_rabbitmq:5672
       JWT_SECRET: ${JWT_SECRET:-SUA_CHAVE_SECRETA_JWT_AQUI}
     labels:
       - "traefik.enable=true"
@@ -150,3 +150,4 @@ services:
     environment:
       NODE_ENV: production
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+      
