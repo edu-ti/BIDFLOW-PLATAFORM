@@ -56,7 +56,7 @@ async function bootstrap() {
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
     options: {
-      urls: ['amqp://guest:guest@localhost:5672'],
+      urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
       queue: 'notification_queue',
       deserializer: new RawJsonDeserializer(),
       noAck: false, // 👈 CRÍTICO: Avisa ao NestJS para gerenciar o basic.ack com segurança, matando o erro 406
