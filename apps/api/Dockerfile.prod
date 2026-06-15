@@ -1,15 +1,20 @@
 # --- Fase de Construção ---
 FROM node:20-alpine AS builder
 
+# Ferramentas nativas (mantemos por segurança para outras dependências)
 RUN apk add --no-cache libc6-compat openssl python3 make g++
 
 WORKDIR /app
 
+# Copia os manifestos primeiro
 COPY package*.json ./
 COPY turbo.json ./
 COPY apps/api/package.json ./apps/api/
+
+# Copia o resto do repositório
 COPY . .
 
+# Instala as dependências, gera o Prisma e faz o build (com Webpack)
 RUN npm install --no-package-lock --legacy-peer-deps
 RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
 RUN cd apps/api && npm run build
@@ -20,16 +25,16 @@ WORKDIR /app
 
 RUN apk add --no-cache libc6-compat openssl
 
-# Copiar os módulos e o mapa do monorepo
+# Copia a raiz
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 
-# COPIAR A PASTA DIST CORRETA DO NESTJS MONOREPO (👇 Alterado aqui)
-COPY --from=builder /app/dist ./dist
+# Copia exatamente a pasta dist gerada pela tua configuração do NestJS
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# EXECUTAR O FICHEIRO DIRETAMENTE DA ESTRUTURA MONOREPO (👇 Alterado aqui)
-CMD ["node", "dist/apps/api/main.js"]
+# Executa o ficheiro principal compilado diretamente!
+CMD ["node", "apps/api/dist/main.js"]
