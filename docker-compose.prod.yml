@@ -105,6 +105,9 @@ services:
     build:
       context: .
       dockerfile: ./apps/web/Dockerfile.prod
+      # 👇 ADICIONAR ESTAS DUAS LINHAS PARA O NEXT.JS VER A API NO BUILD:
+      args:
+        - NEXT_PUBLIC_API_URL=https://api.bidflow.com.br
     container_name: bidflow_web
     restart: unless-stopped
     networks:
@@ -149,5 +152,6 @@ services:
       - rabbitmq
     environment:
       NODE_ENV: production
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@rabbitmq:5672
+      # 👇 ATUALIZADO PARA bidflow_rabbitmq PARA GARANTIR CONEXÃO:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-SUA_SENHA_FORTE_AQUI}@bidflow_rabbitmq:5672
       
